@@ -1,0 +1,464 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>VoicePlayer — Голосовой плеер для ИИ (Antigravity, Codex, Claude Code, Cursor)</title>
+  <meta name="description" content="Бесплатный настольный голосовой плеер, который автоматически озвучивает диалоги и ответы из Antigravity, Codex, Claude Code и Cursor локальным нейроголосом без интернета и подписок." />
+  <link rel="icon" type="image/png" href="icon.png" />
+  <style>
+    :root {
+      --bg: #0d0f0e;
+      --panel: #131615;
+      --panel2: #1c211f;
+      --ink: #e8ecea;
+      --mute: #7c8782;
+      --signal: #7ee2b8;
+      --signal-dark: #109868;
+      --sel: #183329;
+      --hairline: #232927;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: radial-gradient(circle at 50% 0%, #162620 0%, var(--bg) 55%);
+      color: var(--ink);
+      font-family: "Segoe UI", -apple-system, BlinkMacSystemFont, Inter, Roboto, sans-serif;
+      line-height: 1.6;
+      min-height: 100vh;
+    }
+    a { color: var(--signal); text-decoration: none; }
+    .container { max-width: 1120px; margin: 0 auto; padding: 0 24px; }
+
+    /* Навигация */
+    header {
+      border-bottom: 1px solid var(--hairline);
+      background: rgba(13, 15, 14, 0.82);
+      backdrop-filter: blur(12px);
+      position: sticky;
+      top: 0;
+      z-index: 20;
+    }
+    .nav {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      height: 68px;
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      font-weight: 700;
+      font-size: 1.2rem;
+      color: var(--ink);
+    }
+    .brand img { width: 36px; height: 36px; border-radius: 9px; }
+    .badge {
+      background: var(--sel);
+      color: var(--signal);
+      border: 1px solid rgba(126, 226, 184, 0.35);
+      padding: 2px 10px;
+      border-radius: 999px;
+      font-size: 0.78rem;
+      font-weight: 600;
+    }
+    .nav-links { display: flex; gap: 20px; align-items: center; font-size: 0.95rem; }
+    .nav-links a { color: var(--mute); transition: color 0.15s; }
+    .nav-links a:hover { color: var(--ink); }
+
+    /* Кнопки */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 11px 22px;
+      border-radius: 10px;
+      font-weight: 600;
+      font-size: 0.98rem;
+      transition: transform 0.12s, background 0.15s, border-color 0.15s;
+      cursor: pointer;
+      border: 1px solid transparent;
+    }
+    .btn:hover { transform: translateY(-1px); }
+    .btn-primary {
+      background: var(--signal);
+      color: #0d0f0e;
+      box-shadow: 0 8px 28px rgba(126, 226, 184, 0.22);
+    }
+    .btn-primary:hover { background: #6ad6a9; }
+    .btn-secondary {
+      background: var(--panel2);
+      color: var(--ink);
+      border-color: var(--hairline);
+    }
+    .btn-secondary:hover { border-color: var(--signal); }
+
+    /* Hero */
+    .hero {
+      padding: 72px 0 48px;
+      text-align: center;
+    }
+    .hero h1 {
+      font-size: clamp(2.1rem, 4.5vw, 3.4rem);
+      line-height: 1.15;
+      letter-spacing: -0.02em;
+      max-width: 860px;
+      margin: 18px auto 20px;
+    }
+    .hero h1 span { color: var(--signal); }
+    .hero p.lead {
+      color: var(--mute);
+      font-size: 1.16rem;
+      max-width: 720px;
+      margin: 0 auto 32px;
+    }
+    .hero-cta {
+      display: flex;
+      gap: 14px;
+      justify-content: center;
+      flex-wrap: wrap;
+      margin-bottom: 16px;
+    }
+    .sub-note {
+      font-size: 0.85rem;
+      color: var(--mute);
+    }
+
+    /* Живое превью окна приложения */
+    .app-preview {
+      margin: 42px auto 0;
+      background: var(--panel);
+      border: 1px solid var(--hairline);
+      border-radius: 16px;
+      box-shadow: 0 24px 70px rgba(0, 0, 0, 0.65);
+      overflow: hidden;
+      text-align: left;
+    }
+    .app-titlebar {
+      background: var(--panel);
+      border-bottom: 1px solid var(--hairline);
+      padding: 10px 16px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 0.85rem;
+      color: var(--mute);
+    }
+    .app-titlebar .left { display: flex; align-items: center; gap: 10px; color: var(--ink); font-weight: 600; }
+    .app-titlebar img { width: 18px; height: 18px; }
+    .app-grid {
+      display: grid;
+      grid-template-columns: 360px 1fr;
+      min-height: 340px;
+    }
+    @media (max-width: 820px) {
+      .app-grid { grid-template-columns: 1fr; }
+    }
+    .app-col-left {
+      border-right: 1px solid var(--hairline);
+      padding: 16px;
+      background: var(--panel);
+    }
+    .q-row {
+      padding: 10px 12px;
+      border-radius: 8px;
+      margin-bottom: 6px;
+      font-size: 0.88rem;
+      background: var(--panel2);
+      position: relative;
+      overflow: hidden;
+    }
+    .q-row.active {
+      background: var(--sel);
+      border: 1px solid rgba(126, 226, 184, 0.35);
+    }
+    .q-row .meta { display: flex; justify-content: space-between; color: var(--mute); font-size: 0.78rem; margin-bottom: 3px; }
+    .q-row.active .meta { color: var(--signal); }
+    .wave-strip {
+      height: 3px;
+      margin-top: 8px;
+      border-radius: 3px;
+      background: linear-gradient(90deg, transparent 0%, var(--signal) 50%, transparent 100%);
+      background-size: 200% 100%;
+      animation: waveSlide 1.8s infinite linear;
+    }
+    @keyframes waveSlide {
+      0% { background-position: 100% 0; }
+      100% { background-position: -100% 0; }
+    }
+    .app-col-right {
+      padding: 20px 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+    .prompt-box {
+      background: var(--panel2);
+      border-left: 3px solid var(--signal);
+      padding: 10px 14px;
+      border-radius: 6px;
+      font-size: 0.9rem;
+    }
+    .reading-body {
+      font-size: 1rem;
+      color: var(--ink);
+    }
+    .hl-sent {
+      background: var(--sel);
+      padding: 2px 4px;
+      border-radius: 4px;
+    }
+    .hl-word {
+      background: var(--signal);
+      color: #0d0f0e;
+      font-weight: 600;
+      padding: 1px 5px;
+      border-radius: 4px;
+    }
+    .player-bar {
+      border-top: 1px solid var(--hairline);
+      padding: 12px 18px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      background: var(--panel);
+    }
+    .play-btn {
+      width: 38px;
+      height: 32px;
+      border-radius: 8px;
+      background: var(--signal);
+      color: #0d0f0e;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 700;
+    }
+    .waveform-demo {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      gap: 3px;
+      height: 26px;
+    }
+    .waveform-demo span {
+      flex: 1;
+      background: var(--hairline);
+      border-radius: 2px;
+      height: 35%;
+    }
+    .waveform-demo span.played { background: var(--signal); }
+
+    /* Секции */
+    section { padding: 64px 0; border-top: 1px solid var(--hairline); }
+    h2 { font-size: 2rem; margin-bottom: 12px; text-align: center; }
+    p.sec-sub { color: var(--mute); text-align: center; max-width: 660px; margin: 0 auto 40px; }
+
+    .features {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      gap: 20px;
+    }
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--hairline);
+      border-radius: 14px;
+      padding: 24px;
+    }
+    .card h3 { font-size: 1.15rem; margin-bottom: 8px; color: var(--ink); display: flex; align-items: center; gap: 8px; }
+    .card p { color: var(--mute); font-size: 0.95rem; }
+
+    /* WinRAR / Supporter секция */
+    .supporter-box {
+      background: linear-gradient(145deg, #15241f 0%, var(--panel) 100%);
+      border: 1px solid rgba(126, 226, 184, 0.35);
+      border-radius: 18px;
+      padding: 36px;
+      max-width: 820px;
+      margin: 0 auto;
+      text-align: center;
+    }
+    .supporter-box h3 { font-size: 1.6rem; margin-bottom: 12px; }
+    .supporter-box p { color: var(--mute); margin-bottom: 24px; }
+
+    footer {
+      border-top: 1px solid var(--hairline);
+      padding: 32px 0;
+      text-align: center;
+      color: var(--mute);
+      font-size: 0.9rem;
+    }
+  </style>
+</head>
+<body>
+
+  <header>
+    <div class="container nav">
+      <div class="brand">
+        <img src="icon.png" alt="VoicePlayer" />
+        <span>VoicePlayer</span>
+        <span class="badge">v1.2.0 · Бесплатно</span>
+      </div>
+      <div class="nav-links">
+        <a href="#features">Возможности</a>
+        <a href="#ai">Нейросети</a>
+        <a href="#support">♥ Поддержать / Pro</a>
+        <a href="#download" class="btn btn-primary" style="padding: 7px 16px; font-size: 0.9rem;">Скачать</a>
+      </div>
+    </div>
+  </header>
+
+  <main class="container">
+    <div class="hero" id="download">
+      <span class="badge">Работает с Antigravity · Codex · Claude Code · Cursor</span>
+      <h1>Ваши ИИ-агенты <span>заговорят живым голосом</span> без лимитов и облачных подписок</h1>
+      <p class="lead">
+        VoicePlayer автоматически перехватывает ответы из IDE и терминала, красиво форматирует таблицы и код,
+        подсвечивает каждое произносимое слово и озвучивает всё локально прямо на вашем процессоре.
+      </p>
+      <div class="hero-cta">
+        <a href="https://github.com/infostroper-cloud/voice-player/releases/latest/download/VoicePlayer-Installer-1.2.0.zip" class="btn btn-primary">
+          ⬇ Скачать установщик для Windows (v1.2.0)
+        </a>
+        <a href="https://github.com/infostroper-cloud/voice-player/releases/latest" class="btn btn-secondary">
+          📦 Все файлы релиза на GitHub
+        </a>
+        <a href="#support" class="btn btn-secondary">
+          ♥ Поддержать проект (Telegram / Boosty)
+        </a>
+      </div>
+      <p class="sub-note">100% бесплатно (модель WinRAR) · Автоматическое обновление · 0 ₽ затрат на API</p>
+
+      <!-- Живой макет 2-колоночного интерфейса -->
+      <div class="app-preview">
+        <div class="app-titlebar">
+          <div class="left">
+            <img src="icon.png" alt="" />
+            <span>VoicePlayer</span>
+          </div>
+          <span>—  □  ✕</span>
+        </div>
+        <div class="app-grid">
+          <div class="app-col-left">
+            <div style="display:flex; justify-content:space-between; margin-bottom:12px; font-weight:600;">
+              <span>Очередь <span class="badge">🤖 3</span></span>
+              <span style="color:var(--mute); font-size:0.85rem;">☀ · 🤖 ИИ · ★ Pro</span>
+            </div>
+            <div class="q-row active">
+              <div class="meta"><span>🤖 Antigravity · Рефакторинг</span><span>23:20</span></div>
+              <div>Готово! Верхняя полоса окна и новая мятная иконка…</div>
+            </div>
+            <div class="q-row">
+              <div class="meta"><span>🤖 Codex · Выпуск релиза</span><span>23:18</span></div>
+              <div>Архив обновления собран и проверен через self-test…</div>
+              <div class="wave-strip" title="Идёт волновой рендер аудио"></div>
+            </div>
+            <div class="q-row">
+              <div class="meta"><span>🤖 Codex CLI · Тесты</span><span>23:14</span></div>
+              <div>Все 59 юнит-тестов прошли успешно за 0.3 секунды.</div>
+            </div>
+          </div>
+          <div class="app-col-right">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+              <strong style="font-size:1.1rem;">🤖 Antigravity · Рефакторинг UI и упаковки</strong>
+              <span class="badge">На компьютере — Денис (Piper)</span>
+            </div>
+            <div class="prompt-box">
+              💬 <strong>Запрос:</strong> Сделай волновую анимацию рендера вместо песочных часов, тёмную шапку окна и современную иконку.
+            </div>
+            <div class="reading-body">
+              <p style="margin-bottom:10px;">
+                <span class="hl-sent">Статичные песочные часы полностью убраны, и вместо них вдоль трека скользит <span class="hl-word">волнообразная</span> анимация-ползунок.</span>
+                Верхняя рамка окна Windows теперь автоматически окрашивается в тёмный изумрудно-графитовый цвет темы.
+              </p>
+              <p style="color:var(--mute); font-size:0.92rem;">
+                • Клик по любому предложению мгновенно перематывает звук к этому месту.<br/>
+                • Нажмите <code>Ctrl+Alt+S</code> в любом окне, чтобы озвучить выделенный текст.
+              </p>
+            </div>
+          </div>
+        </div>
+        <div class="player-bar">
+          <div class="play-btn">⏸</div>
+          <span style="font-size:0.82rem; color:var(--mute);">0:14</span>
+          <div class="waveform-demo">
+            <span class="played" style="height:45%"></span>
+            <span class="played" style="height:80%"></span>
+            <span class="played" style="height:60%"></span>
+            <span class="played" style="height:95%"></span>
+            <span class="played" style="height:50%"></span>
+            <span class="played" style="height:75%"></span>
+            <span style="height:65%"></span>
+            <span style="height:40%"></span>
+            <span style="height:85%"></span>
+            <span style="height:55%"></span>
+            <span style="height:35%"></span>
+            <span style="height:70%"></span>
+          </div>
+          <span style="font-size:0.82rem; color:var(--mute);">1:08</span>
+          <span class="badge">1.25×</span>
+          <span class="badge">❐ Мини</span>
+        </div>
+      </div>
+    </div>
+
+    <section id="features">
+      <h2>Почему разработчики переходят на VoicePlayer</h2>
+      <p class="sec-sub">Глаза устают читать километры логов и ответов нейросетей после 8 часов за кодом. Включите озвучку и слушайте ответы откинувшись в кресле.</p>
+      <div class="features">
+        <div class="card" id="ai">
+          <h3>🤖 Автоперехват всех ИИ</h3>
+          <p>На лету подтягивает диалоги, ваши промпты и финальные ответы из <strong>Antigravity</strong>, <strong>Codex Desktop</strong>, терминального <strong>Codex CLI</strong>, <strong>Claude Code</strong> и <strong>Cursor</strong>.</p>
+        </div>
+        <div class="card">
+          <h3>⚡ Локальный голос (0 ₽ и без сети)</h3>
+          <p>Встроенный нейросетевой движок Piper ONNX синтезирует русскую и английскую речь в 25× быстрее реального времени прямо на CPU. Ваши промпты и код никуда не уходят.</p>
+        </div>
+        <div class="card">
+          <h3>📊 Умное чтение таблиц и кода</h3>
+          <p>Таблицы из Markdown, терминала и Excel превращаются в аккуратные карточки с подсветкой читаемой ячейки, а пути к файлам и хэши не засоряют речь мусором.</p>
+        </div>
+        <div class="card">
+          <h3>🎯 Караоке-подсветка и переход по клику</h3>
+          <p>Каждое произносимое предложение и слово подсвечиваются в реальном времени. Кликните в любой абзац — и плеер мгновенно перемотает голос туда.</p>
+        </div>
+        <div class="card">
+          <h3>❐ Компактный мини-плеер и Ctrl+Alt+S</h3>
+          <p>Сверните плеер в крошечную плашку поверх окон или выделите любой текст в браузере/PDF и нажмите <code>Ctrl+Alt+S</code> для мгновенной озвучки.</p>
+        </div>
+        <div class="card">
+          <h3>🔄 Безопасное автообновление</h3>
+          <p>Новые версии скачиваются в фоне (всего ~160 КБ), проверяются через встроенный <code>--self-test</code> и при малейшем сбое автоматически откатываются назад.</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="support">
+      <div class="supporter-box">
+        <span class="badge" style="margin-bottom:12px; display:inline-block;">Честная модель распространения (как WinRAR)</span>
+        <h3>Бесплатно для всех · Развивается при поддержке сообщества</h3>
+        <p>
+          В VoicePlayer нет искусственных пейволлов, урезанных лимитов по минутам или принудительных ежемесячных подписок.
+          Если плеер экономит вам время и бережёт глаза — поддержите автора донатом или приобретите пожизненный ключ
+          <strong>VoicePlayer Supporter (★ Pro)</strong>.
+        </p>
+        <div class="hero-cta">
+          <a href="https://t.me/tribute" target="_blank" rel="noopener" class="btn btn-primary">
+            ✈️ Поддержать в Telegram (Tribute)
+          </a>
+          <a href="https://boosty.to" target="_blank" rel="noopener" class="btn btn-secondary">
+            🧡 Купить ключ ★ Pro на Boosty
+          </a>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="container">
+      <p>VoicePlayer v1.2.0 · Сделано для тех, кто работает с ИИ каждый день</p>
+    </div>
+  </footer>
+
+</body>
+</html>
