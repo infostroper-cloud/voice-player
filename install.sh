@@ -17,14 +17,30 @@ esac
 
 echo "Detected platform: $PLATFORM"
 
-# Select best Python binary (prefer Homebrew Python on macOS if available)
+# Select best Python binary with Tkinter support
 PY_BIN=""
 if [ "$PLATFORM" = "macOS" ]; then
-    if [ -x "/opt/homebrew/bin/python3" ]; then
-        PY_BIN="/opt/homebrew/bin/python3"
-    elif [ -x "/usr/local/bin/python3" ]; then
-        PY_BIN="/usr/local/bin/python3"
-    fi
+    MAC_CANDIDATES=(
+        "/opt/homebrew/bin/python3"
+        "/usr/local/bin/python3"
+        "/Library/Frameworks/Python.framework/Versions/3.13/bin/python3"
+        "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3"
+        "/Library/Frameworks/Python.framework/Versions/3.11/bin/python3"
+        "/Library/Frameworks/Python.framework/Versions/Current/bin/python3"
+        "$HOME/.pyenv/shims/python3"
+        "$(command -v python3 2>/dev/null || true)"
+        "$(command -v python 2>/dev/null || true)"
+    )
+    for cand in "${MAC_CANDIDATES[@]}"; do
+        if [ -n "$cand" ] && [ -x "$cand" ]; then
+            if "$cand" -c "import tkinter as tk; r = tk.Tk(); r.withdraw(); r.destroy()" >/dev/null 2>&1; then
+                PY_BIN="$cand"
+                break
+            elif [ -z "$PY_BIN" ]; then
+                PY_BIN="$cand"
+            fi
+        fi
+    done
 fi
 
 if [ -z "$PY_BIN" ]; then
@@ -45,8 +61,18 @@ echo "Using Python: $PY_BIN (version $PY_VER)"
 if ! $PY_BIN -c "import tkinter as tk; r = tk.Tk(); r.withdraw(); r.destroy()" >/dev/null 2>&1; then
     echo "⚠️ Warning: Tkinter GUI could not initialize on current Python ($PY_BIN)."
     if [ "$PLATFORM" = "macOS" ]; then
-        echo "  👉 On macOS: please install official Python 3.12 from https://www.python.org"
-        echo "     or install Homebrew python-tk: 'brew install python-tk'"
+        if command -v brew >/dev/null 2>&1; then
+            echo "🔧 Homebrew detected. Automatically installing Tkinter support..."
+            brew install python-tk || true
+            if [ -x "/opt/homebrew/bin/python3" ]; then PY_BIN="/opt/homebrew/bin/python3"; fi
+            if [ -x "/usr/local/bin/python3" ]; then PY_BIN="/usr/local/bin/python3"; fi
+        fi
+        if ! $PY_BIN -c "import tkinter as tk; r = tk.Tk(); r.withdraw(); r.destroy()" >/dev/null 2>&1; then
+            echo "❌ Tkinter GUI is missing. VoicePlayer requires Tkinter to display its window."
+            echo "👉 Please install official Python with Tkinter from: https://www.python.org/downloads/macos/"
+            echo "   or run in terminal: brew install python-tk"
+            exit 1
+        fi
     else
         echo "  👉 On Ubuntu/Debian: run 'sudo apt update && sudo apt install -y python3-tk libportaudio2'"
         echo "  👉 On Fedora/RHEL: run 'sudo dnf install -y python3-tkinter portaudio'"

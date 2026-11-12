@@ -534,8 +534,8 @@
         <p class="card-desc" id="desc-mac">Оптимизировано для чипов Apple Silicon (M1/M2/M3/M4) и Intel x86_64. Нативная интеграция с папкой Программы, поддержка тёмной темы и горячих клавиш.</p>
 
         <!-- Direct 1-Click Double-Clickable Installer on Mac -->
-        <a href="https://raw.githubusercontent.com/infostroper-cloud/voice-player/main/VoicePlayer-macOS-Installer.command" download="VoicePlayer-macOS-Installer.command" class="btn btn-glow" id="btn-mac-run">
-          ⚡ Скачать установщик (.command в 1 клик)
+        <a href="https://github.com/infostroper-cloud/voice-player/releases/download/voice-player-v1.2.0/VoicePlayer-macOS-Installer.zip" class="btn btn-glow" id="btn-mac-run">
+          ⚡ Скачать установщик (.zip в 1 клик)
         </a>
         <a href="https://github.com/infostroper-cloud/voice-player/releases/download/voice-player-v1.2.0/VoicePlayer-1.2.0-macos-linux.tar.gz" class="btn btn-outline" id="btn-mac-tar">
           📦 Автономный архив (.tar.gz, 217 КБ)
@@ -602,8 +602,8 @@
         <div class="card-meta" id="meta-linux">Ubuntu, Debian, Fedora, Arch & Manjaro</div>
         <p class="card-desc" id="desc-linux">Устанавливается в ~/.voice-player с автоматической интеграцией в меню приложений (.desktop) для GNOME, KDE, XFCE и системной командой voiceplayer в PATH.</p>
 
-        <a href="https://raw.githubusercontent.com/infostroper-cloud/voice-player/main/install.sh" download="install.sh" class="btn btn-glow" id="btn-linux-sh">
-          ⚡ Скачать скрипт установки (install.sh)
+        <a href="https://github.com/infostroper-cloud/voice-player/releases/download/voice-player-v1.2.0/VoicePlayer-1.2.0-macos-linux.tar.gz" class="btn btn-glow" id="btn-linux-sh">
+          📦 Скачать пакет VoicePlayer (.tar.gz)
         </a>
         <a href="https://github.com/infostroper-cloud/voice-player/releases/download/voice-player-v1.2.0/VoicePlayer-1.2.0-macos-linux.tar.gz" class="btn btn-outline" id="btn-linux-tar">
           📦 Автономный архив (.tar.gz, 217 КБ)
@@ -807,10 +807,10 @@
         titleMac: "Apple macOS",
         metaMac: "macOS 11+ (Big Sur, Monterey, Ventura, Sonoma, Sequoia)",
         descMac: "Оптимизировано для чипов Apple Silicon (M1/M2/M3/M4) и Intel x86_64. Нативная интеграция с папкой Программы, поддержка тёмной темы и горячих клавиш.",
-        btnMacRun: "⚡ Скачать установщик (.command в 1 клик)",
+        btnMacRun: "⚡ Скачать установщик (.zip в 1 клик)",
         btnMacTar: "📦 Автономный архив (.tar.gz, 217 КБ)",
         lblMacCmd: "Или установка через Терминал:",
-        hintMac: "Требуется Python 3.10+ (brew install python python-tk или python.org)",
+        hintMac: "Распакуйте .zip и дважды кликните установщик (или используйте Терминал)",
         titleWin: "Microsoft Windows",
         metaWin: "Windows 10 / 11 (64-бит)",
         descWin: "Полноценный графический установщик с автоматическим созданием ярлыков на Рабочем столе, закреплением в панели задач и фоновым обновлением.",
@@ -821,7 +821,7 @@
         titleLinux: "Linux",
         metaLinux: "Ubuntu, Debian, Fedora, Arch & Manjaro",
         descLinux: "Устанавливается в ~/.voice-player с автоматической интеграцией в меню приложений (.desktop) для GNOME, KDE, XFCE и системной командой voiceplayer в PATH.",
-        btnLinuxSh: "⚡ Скачать скрипт установки (install.sh)",
+        btnLinuxSh: "📦 Скачать пакет VoicePlayer (.tar.gz)",
         btnLinuxTar: "📦 Автономный архив (.tar.gz, 217 КБ)",
         lblLinuxCmd: "Или установка в 1 команду:",
         hintLinux: "Требуется Python 3.10+ и пакет python3-tk",
@@ -849,10 +849,10 @@
         titleMac: "Apple macOS",
         metaMac: "macOS 11+ (Big Sur, Monterey, Ventura, Sonoma, Sequoia)",
         descMac: "Optimized for Apple Silicon (M1/M2/M3/M4) and Intel x86_64. Native Applications integration, dark mode, and hotkeys.",
-        btnMacRun: "⚡ Download Installer (.command 1-Click)",
+        btnMacRun: "⚡ Download Installer (.zip 1-Click)",
         btnMacTar: "📦 Standalone Archive (.tar.gz, 217 KB)",
         lblMacCmd: "Or install via Terminal:",
-        hintMac: "Requires Python 3.10+ (brew install python python-tk or python.org)",
+        hintMac: "Unzip and double-click the installer (or use the Terminal command below)",
         titleWin: "Microsoft Windows",
         metaWin: "Windows 10 / 11 (64-bit)",
         descWin: "Full-featured GUI installer with desktop shortcuts, taskbar pinning, and background self-healing auto-updates.",
@@ -863,7 +863,7 @@
         titleLinux: "Linux",
         metaLinux: "Ubuntu, Debian, Fedora, Arch & Manjaro",
         descLinux: "Installs cleanly into ~/.voice-player with .desktop application launcher for GNOME/KDE and CLI command in PATH.",
-        btnLinuxSh: "⚡ Download Shell Script (install.sh)",
+        btnLinuxSh: "📦 Download VoicePlayer Package (.tar.gz)",
         btnLinuxTar: "📦 Standalone Archive (.tar.gz, 217 KB)",
         lblLinuxCmd: "Or 1-line terminal install:",
         hintLinux: "Requires Python 3.10+ and python3-tk package",
@@ -891,10 +891,10 @@
         titleMac: "Apple macOS",
         metaMac: "macOS 11+ (Big Sur, Monterey, Ventura, Sonoma, Sequoia)",
         descMac: "Optimizado para chips Apple Silicon (M1-M4) e Intel x86_64. Integración nativa en Aplicaciones y modo oscuro.",
-        btnMacRun: "⚡ Descargar instalador (.command en 1 clic)",
+        btnMacRun: "⚡ Descargar instalador (.zip en 1 clic)",
         btnMacTar: "📦 Paquete independiente (.tar.gz, 217 KB)",
         lblMacCmd: "O instalar por Terminal:",
-        hintMac: "Requiere Python 3.10+ (brew install python python-tk o python.org)",
+        hintMac: "Descomprime el .zip y haz doble clic (o usa el comando de Terminal)",
         titleWin: "Microsoft Windows",
         metaWin: "Windows 10 / 11 (64 bits)",
         descWin: "Instalador con creación de accesos directos, anclaje a barra de tareas y autoactualización.",
@@ -905,7 +905,7 @@
         titleLinux: "Linux",
         metaLinux: "Ubuntu, Debian, Fedora, Arch y Manjaro",
         descLinux: "Se instala en ~/.voice-player con lanzador .desktop para GNOME y KDE.",
-        btnLinuxSh: "⚡ Descargar script (install.sh)",
+        btnLinuxSh: "📦 Descargar paquete (.tar.gz)",
         btnLinuxTar: "📦 Paquete independiente (.tar.gz, 217 KB)",
         lblLinuxCmd: "O instalar en 1 comando:",
         hintLinux: "Requiere Python 3.10+ y python3-tk",
@@ -933,10 +933,10 @@
         titleMac: "Apple macOS",
         metaMac: "macOS 11+ (Big Sur, Monterey, Ventura, Sonoma, Sequoia)",
         descMac: "Apple Silicon (M1〜M4) および Intel に最適化。アプリケーションフォルダ連携、ダークテーマ、ショートカット対応。",
-        btnMacRun: "⚡ インストーラーをダウンロード (.command 1クリック)",
+        btnMacRun: "⚡ インストーラーをダウンロード (.zip 1クリック)",
         btnMacTar: "📦 スタンドアロンアーカイブ (.tar.gz, 217 KB)",
         lblMacCmd: "またはターミナルからインストール:",
-        hintMac: "Python 3.10+ が必要です (brew install python python-tk または python.org)",
+        hintMac: ".zip を解凍してインストーラーを実行（またはターミナルコマンドを実行）",
         titleWin: "Microsoft Windows",
         metaWin: "Windows 10 / 11 (64ビット)",
         descWin: "デスクトップショートカット作成、タスクバーピン留め、自動バックグラウンド更新を備えたGUIインストーラー。",
@@ -947,7 +947,7 @@
         titleLinux: "Linux",
         metaLinux: "Ubuntu, Debian, Fedora, Arch & Manjaro",
         descLinux: "~/.voice-player にインストールされ、GNOME/KDE用 .desktop ランチャーと PATH コマンドを自動設定。",
-        btnLinuxSh: "⚡ インストールスクリプト (install.sh)",
+        btnLinuxSh: "📦 VoicePlayer パッケージ (.tar.gz)",
         btnLinuxTar: "📦 スタンドアロンアーカイブ (.tar.gz, 217 KB)",
         lblLinuxCmd: "または1行コマンドでインストール:",
         hintLinux: "Python 3.10+ および python3-tk パッケージが必要",
@@ -975,10 +975,10 @@
         titleMac: "Apple macOS",
         metaMac: "macOS 11+ (Big Sur, Monterey, Ventura, Sonoma, Sequoia)",
         descMac: "针对 Apple Silicon (M1-M4) 和 Intel 深度优化。原生应用程序目录集成，支持深色模式与快捷键。",
-        btnMacRun: "⚡ 下载安装程序 (.command 一键安装)",
+        btnMacRun: "⚡ 下载安装程序 (.zip 一键安装)",
         btnMacTar: "📦 独立离线包 (.tar.gz, 217 KB)",
         lblMacCmd: "或通过终端命令安装:",
-        hintMac: "需要 Python 3.10+ (brew install python python-tk 或 python.org)",
+        hintMac: "解压 .zip 并双击运行安装程序（或在终端运行下方命令）",
         titleWin: "Microsoft Windows",
         metaWin: "Windows 10 / 11 (64位)",
         descWin: "全功能图形化安装包，自动创建桌面图标、任务栏锁定与后台自我修复更新。",
@@ -989,7 +989,7 @@
         titleLinux: "Linux",
         metaLinux: "Ubuntu, Debian, Fedora, Arch & Manjaro",
         descLinux: "一键安装至 ~/.voice-player，自动配置 GNOME/KDE 的 .desktop 启动图标与终端 PATH 命令。",
-        btnLinuxSh: "⚡ 下载安装脚本 (install.sh)",
+        btnLinuxSh: "📦 下载离线安装包 (.tar.gz)",
         btnLinuxTar: "📦 独立离线包 (.tar.gz, 217 KB)",
         lblLinuxCmd: "或通过单行命令安装:",
         hintLinux: "需要 Python 3.10+ 及 python3-tk 组件包",
