@@ -2906,6 +2906,11 @@ class VoicePlayerApp:
                 except Exception:
                     pass
 
+            if hasattr(self, "var_sleep"):
+                off_states = {"выкл", "off", "desactivado", "关闭", "बंद", "オフ", "aus", "désactivé", ""}
+                if str(self.var_sleep.get()).lower() in off_states:
+                    self.var_sleep.set(vp_i18n.t("off"))
+
             # Пересоздать контекстное меню и меню списка с локализованными пунктами
             try:
                 self._build_list_menu()
