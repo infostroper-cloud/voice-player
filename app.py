@@ -3642,6 +3642,25 @@ class VoicePlayerApp:
         self.root.bind("<KeyPress-r>", lambda e: self.action_repeat() if not isinstance(e.widget, (ttk.Entry, tk.Text)) else None)
         self.root.bind("<Control-f>", lambda e: self._toggle_search())
         self.root.bind("<Escape>",   lambda e: self._on_escape())
+        # Расширенные горячие клавиши (F1, Ctrl+,, Ctrl+M, Ctrl+T, Ctrl+L, Ctrl+I, Ctrl+D, Ctrl+E, Ctrl+S, Ctrl+1..4)
+        self.root.bind("<F1>", lambda e: self._show_shortcuts_dialog())
+        self.root.bind("<Control-h>", lambda e: self._show_shortcuts_dialog())
+        self.root.bind("<Control-comma>", lambda e: self._open_settings())
+        self.root.bind("<Control-m>", lambda e: self._toggle_dnd_quick())
+        self.root.bind("<Control-t>", lambda e: self._toggle_tools())
+        self.root.bind("<Control-l>", lambda e: self.tts_input.delete("1.0", "end") if hasattr(self, "tts_input") else None)
+        self.root.bind("<Control-i>", lambda e: self.tts_input.focus_set() if hasattr(self, "tts_input") else None)
+        self.root.bind("<Control-d>", lambda e: self._toggle_dictate())
+        self.root.bind("<Control-e>", lambda e: self._toggle_edit_text())
+        self.root.bind("<Control-s>", lambda e: self._export_mp3())
+        self.root.bind("<Control-Delete>", lambda e: self._delete_current_or_selected())
+        self.root.bind("<Control-Shift-L>", lambda e: self._clear_queue())
+        self.root.bind("<Control-u>", lambda e: threading.Thread(target=self._check_update, args=(True,), daemon=True, name="update-check").start())
+        self.root.bind("<F5>", lambda e: self._pull_recent_ai(limit_per_source=8, silent=False))
+        self.root.bind("<Control-Key-1>", lambda e: self._set_rate_pill(1.0))
+        self.root.bind("<Control-Key-2>", lambda e: self._set_rate_pill(1.25))
+        self.root.bind("<Control-Key-3>", lambda e: self._set_rate_pill(1.5))
+        self.root.bind("<Control-Key-4>", lambda e: self._set_rate_pill(2.0))
 
         self._update_filter_pills()
         self._update_rate_pills()
@@ -3735,7 +3754,7 @@ class VoicePlayerApp:
 
     def _on_sleep_change(self, _e=None):
         v = self.var_sleep.get()
-        if v == "выкл":
+        if v == vp_i18n.t("off") or v in ("выкл", "off", "desactivado", "关闭", "オフ", "Aus", "désactivé"):
             self._set_sleep_timer(0)
         else:
             try: self._set_sleep_timer(int(v.split()[0]))
@@ -4347,7 +4366,8 @@ class VoicePlayerApp:
     def _apply_tools_state(self):
         """Показать/спрятать сворачиваемый ящик «Инструменты»."""
         open_ = self.var_tools_open.get()
-        self.btn_tools.configure(text=("🛠 Инструменты ▾" if open_ else "🛠 Инструменты ▸"))
+        arr = " ▾" if open_ else " ▸"
+        self.btn_tools.configure(text=f"🛠 {vp_i18n.t('tools')}{arr}")
         if open_:
             self.tools_box.grid()
         else:
@@ -4636,8 +4656,12 @@ class VoicePlayerApp:
                         command=lambda: (self._save_prefs(), self._render_list())).grid(
             row=50, column=0, columnspan=2, sticky="w", pady=(10, 0))
         ttk.Label(t1, text=vp_i18n.t("opt_sleep_timer")).grid(row=5, column=0, sticky="w", pady=(10, 0))
-        slp = ttk.Combobox(t1, textvariable=self.var_sleep, state="readonly", width=12,
-                           values=[vp_i18n.t("off"), f"15 {vp_i18n.t('min_short')}", f"30 {vp_i18n.t('min_short')}", f"45 {vp_i18n.t('min_short')}", f"60 {vp_i18n.t('min_short')}"])
+        off_lbl = vp_i18n.t("off")
+        m_lbl = vp_i18n.t("min_short")
+        if self.var_sleep.get() in ("выкл", "off", ""):
+            self.var_sleep.set(off_lbl)
+        slp_opts = [off_lbl, f"15 {m_lbl}", f"30 {m_lbl}", f"45 {m_lbl}", f"60 {m_lbl}"]
+        slp = ttk.Combobox(t1, textvariable=self.var_sleep, state="readonly", width=12, values=slp_opts)
         slp.grid(row=5, column=1, sticky="ew", pady=(10, 0)); slp.bind("<<ComboboxSelected>>", self._on_sleep_change)
         # тихие часы: не беспокоить + интервал «с … до …»
         ttk.Checkbutton(t1, text=vp_i18n.t("opt_dnd"), variable=self.var_dnd,
@@ -4699,16 +4723,43 @@ class VoicePlayerApp:
                                  command=_apply_lang_action)
         btn_lang_ok.grid(row=0, column=2, padx=(8, 0))
 
-        cmb_lang.bind("<<ComboboxSelected>>", lambda _e: _apply_lang_action())
+        # Selection in combobox waits for button click
+        # (user requested no auto-apply until button pressed)
 
         ttk.Label(t3, text=vp_i18n.t("theme")).grid(row=2, column=0, sticky="w", pady=(8, 0))
-        thm = ttk.Combobox(t3, textvariable=self.var_theme, state="readonly", width=12,
-                           values=["Светлая", "Тёмная"])
-        thm.grid(row=2, column=1, sticky="ew", pady=(8, 0)); thm.bind("<<ComboboxSelected>>", self._on_theme_change)
+        th_dark = vp_i18n.t("theme_dark")
+        th_light = vp_i18n.t("theme_light")
+        cur_th = th_dark if str(self.var_theme.get()).lower().startswith(("т", "d", "o", "s")) else th_light
+        self.var_theme_display = tk.StringVar(value=cur_th)
+        thm = ttk.Combobox(t3, textvariable=self.var_theme_display, state="readonly", width=12,
+                           values=[th_dark, th_light])
+        def _on_thm_sel(_e=None):
+            val = self.var_theme_display.get()
+            chosen = "Тёмная" if val == th_dark else "Светлая"
+            self.var_theme.set(chosen)
+            self._apply_theme(chosen)
+        thm.grid(row=2, column=1, sticky="ew", pady=(8, 0)); thm.bind("<<ComboboxSelected>>", _on_thm_sel)
+
         ttk.Label(t3, text=vp_i18n.t("accent_color")).grid(row=3, column=0, sticky="w", pady=(8, 0))
-        acc = ttk.Combobox(t3, textvariable=self.var_accent, state="readonly", width=12,
-                           values=list(self._accent_colors.keys()))
-        acc.grid(row=3, column=1, sticky="ew", pady=(8, 0)); acc.bind("<<ComboboxSelected>>", self._on_accent_change)
+        accent_keys = [
+            ("Мята", vp_i18n.t("accent_mint")),
+            ("Синий", vp_i18n.t("accent_blue")),
+            ("Графит", vp_i18n.t("accent_graphite")),
+            ("Зелёный", vp_i18n.t("accent_green")),
+            ("Фиолетовый", vp_i18n.t("accent_violet")),
+        ]
+        cur_acc_internal = self.var_accent.get()
+        cur_acc_display = next((d for k, d in accent_keys if k == cur_acc_internal), cur_acc_internal)
+        self.var_accent_display = tk.StringVar(value=cur_acc_display)
+        acc_values = [d for _, d in accent_keys]
+        acc = ttk.Combobox(t3, textvariable=self.var_accent_display, state="readonly", width=12,
+                           values=acc_values)
+        def _on_acc_sel(_e=None):
+            val = self.var_accent_display.get()
+            orig = next((k for k, d in accent_keys if d == val), val)
+            self.var_accent.set(orig)
+            self._on_accent_change()
+        acc.grid(row=3, column=1, sticky="ew", pady=(8, 0)); acc.bind("<<ComboboxSelected>>", _on_acc_sel)
         ttk.Label(t3, text=vp_i18n.t("font_hint"),
                   style="Dim.TLabel").grid(row=4, column=0, columnspan=2, sticky="w", pady=(8, 0))
 
@@ -6922,13 +6973,14 @@ class VoicePlayerApp:
         items = int(max(0, getattr(self, "_stats_items", 0)))
         hrs, rem = divmod(secs, 3600)
         mins = rem // 60
+        m_lbl = vp_i18n.t("min_short")
         if hrs > 0:
-            t_str = f"{hrs} ч {mins} мин"
+            t_str = f"{hrs}h {mins}{m_lbl}"
         elif mins > 0:
-            t_str = f"{mins} мин"
+            t_str = f"{mins} {m_lbl}"
         else:
-            t_str = f"{secs} сек"
-        return f"Озвучено для вас: {t_str}  ·  {items} ответов ИИ и реплик"
+            t_str = f"{secs}s"
+        return vp_i18n.t("stats_spoken_for_you", time=t_str, count=items)
 
     def _maybe_show_support_reminder(self):
         """Ненавязчивое окно в стиле WinRAR: не чаще раза в 7 дней после ощутимой пользы,
@@ -6956,7 +7008,7 @@ class VoicePlayerApp:
         cc = getattr(self, "colors", None) or self._palette(self.var_theme.get())
         w = tk.Toplevel(self.root)
         self._support_win = w
-        w.title("О проекте · Поддержать VoicePlayer")
+        w.title(vp_i18n.t("about_win_title"))
         w.configure(bg=cc["panel"])
         self._center_over_root(w, 560, 420)
         w.transient(self.root)
@@ -6965,8 +7017,8 @@ class VoicePlayerApp:
         box.pack(fill="both", expand=True)
         box.columnconfigure(0, weight=1)
 
-        title_txt = ("VoicePlayer уже сэкономил вам массу времени!" if is_reminder
-                     else f"VoicePlayer {APP_VERSION}  ·  Голосовой плеер для ИИ и команд")
+        title_txt = (vp_i18n.t("about_saved_time") if is_reminder
+                     else f"VoicePlayer {APP_VERSION}  ·  {vp_i18n.t('app_tagline')}")
         ttk.Label(box, text=title_txt, style="Hero.TLabel").grid(row=0, column=0, sticky="w")
 
         # Карточка со статистикой пользы
@@ -6975,13 +7027,7 @@ class VoicePlayerApp:
         ttk.Label(stat_card, text="📊  " + self._format_stats_summary(),
                   style="Prompt.TLabel").pack(anchor="w")
 
-        desc = (
-            "VoicePlayer распространяется по честной модели (как WinRAR):\n"
-            "• Полная версия и локальные нейросетевые голоса работают бесплатно и без ограничений по времени.\n"
-            "• Озвучка идёт прямо на вашем процессоре — ваши диалоги из Antigravity, Codex и Claude никуда не отправляются.\n\n"
-            "Если плеер помогает вам работать быстрее и бережёт зрение — поддержите проект донатом "
-            "или активируйте пожизненный ключ Supporter (убирает напоминания и отмечает ваш статус ★ Pro)."
-        )
+        desc = vp_i18n.t("about_desc")
         ttk.Label(box, text=desc, style="TLabel", wraplength=510, justify="left").grid(
             row=2, column=0, sticky="w", pady=(0, 12))
 
@@ -6991,26 +7037,26 @@ class VoicePlayerApp:
         tg_channel_url = "https://t.me/voiceplayer_ai"
         btn_row = ttk.Frame(box)
         btn_row.grid(row=3, column=0, sticky="ew", pady=(0, 14))
-        ttk.Button(btn_row, text="♥  Донат (TG)", style="Primary.TButton",
+        ttk.Button(btn_row, text="♥  " + vp_i18n.t("donate_tg"), style="Primary.TButton",
                    command=lambda: webbrowser.open(donate_url)).pack(side="left", padx=(0, 6))
         ttk.Button(btn_row, text="🧡  Boosty (★ Pro)", style="Toggle.TButton",
                    command=lambda: webbrowser.open(boosty_url)).pack(side="left", padx=(0, 6))
-        ttk.Button(btn_row, text="★  Ключ Pro", style="Toggle.TButton",
+        ttk.Button(btn_row, text="★  " + vp_i18n.t("pro_key"), style="Toggle.TButton",
                    command=lambda: webbrowser.open(pro_key_url)).pack(side="left", padx=(0, 6))
-        ttk.Button(btn_row, text="✈️ Канал", style="Toggle.TButton",
+        ttk.Button(btn_row, text="✈️ " + vp_i18n.t("channel"), style="Toggle.TButton",
                    command=lambda: webbrowser.open(tg_channel_url)).pack(side="left", padx=(0, 6))
-        ttk.Button(btn_row, text="Позже", style="Toggle.TButton",
+        ttk.Button(btn_row, text=vp_i18n.t("later"), style="Toggle.TButton",
                    command=w.destroy).pack(side="left")
 
         # Поле активации ключа Supporter
         key_frame = ttk.Frame(box)
         key_frame.grid(row=4, column=0, sticky="ew", pady=(4, 0))
         key_frame.columnconfigure(1, weight=1)
-        ttk.Label(key_frame, text="Ключ Supporter:", style="Dim.TLabel").grid(row=0, column=0, sticky="w", padx=(0, 8))
+        ttk.Label(key_frame, text=vp_i18n.t("supporter_key_label") + ":", style="Dim.TLabel").grid(row=0, column=0, sticky="w", padx=(0, 8))
         var_key = tk.StringVar(value=self._supporter_key)
         ent_key = ttk.Entry(key_frame, textvariable=var_key)
         ent_key.grid(row=0, column=1, sticky="ew", padx=(0, 8))
-        lbl_msg = ttk.Label(box, text=("✓ Ключ Supporter активен. Спасибо за поддержку!" if self._is_supporter() else ""),
+        lbl_msg = ttk.Label(box, text=(vp_i18n.t("supporter_active_msg") if self._is_supporter() else ""),
                             style="Dim.TLabel")
         lbl_msg.grid(row=5, column=0, sticky="w", pady=(6, 0))
 
@@ -7019,16 +7065,15 @@ class VoicePlayerApp:
             if verify_supporter_key(k):
                 self._supporter_key = k
                 self._save_prefs()
-                lbl_msg.configure(text="✓ Ключ Supporter успешно активирован! Спасибо за поддержку проекта!")
+                lbl_msg.configure(text=vp_i18n.t("supporter_active_msg"))
                 if hasattr(self, "btn_support"):
                     self.btn_support.configure(text="★ Pro", width=5, style="PillActive.TButton")
             else:
-                lbl_msg.configure(text="⚠ Неверный формат ключа (ожидается VP-PRO-XXXX-XXXX-XXXX)")
+                lbl_msg.configure(text=vp_i18n.t("supporter_invalid_msg"))
 
-        ttk.Button(key_frame, text="Активировать", style="Toggle.TButton", command=activate).grid(row=0, column=2, sticky="e")
+        ttk.Button(key_frame, text=vp_i18n.t("activate_btn"), style="Toggle.TButton", command=activate).grid(row=0, column=2, sticky="e")
 
-        # Ряд прямой поддержки и диагностических логов
-        diag_row = ttk.Frame(box)
+        # diag_row = ttk.Frame(box)
         diag_row.grid(row=6, column=0, sticky="ew", pady=(14, 0))
         ttk.Button(diag_row, text="✉ " + vp_i18n.t("support_channel"), style="Primary.TButton",
                    command=lambda: webbrowser.open("https://t.me/voiceplayer_ai")).pack(side="left", padx=(0, 6))
@@ -7909,3 +7954,86 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+    def _delete_current_or_selected(self):
+        """Удалить текущую или выбранную реплику из очереди."""
+        try:
+            sel = self.tree.selection()
+            if sel:
+                idx = int(sel[0])
+                if 0 <= idx < len(self.queue_items):
+                    del self.queue_items[idx]
+                    self._render_list()
+                    self._set_status("реплика удалена", ok=True)
+                    return
+            if self.current_idx is not None and 0 <= self.current_idx < len(self.queue_items):
+                del self.queue_items[self.current_idx]
+                if self.current_idx >= len(self.queue_items):
+                    self.current_idx = max(0, len(self.queue_items) - 1)
+                self._render_list()
+                self._set_status("текущая реплика удалена", ok=True)
+        except Exception as e:
+            log_line(f"delete_item error: {e}")
+
+    def _show_shortcuts_dialog(self):
+        """Красивое всплывающее окно со всеми горячими клавишами VoicePlayer."""
+        c = self.colors
+        w = tk.Toplevel(self.root)
+        w.title(vp_i18n.t("shortcuts_title"))
+        w.configure(bg=c["bg"])
+        self._center_over_root(w, 560, 520)
+        w.transient(self.root)
+
+        box = ttk.Frame(w, padding=18)
+        box.pack(fill="both", expand=True)
+
+        ttk.Label(box, text="⌨ " + vp_i18n.t("shortcuts_title"), font=("Segoe UI Semibold", 13)).pack(anchor="w", pady=(0, 10))
+
+        # Список горячих клавиш: (Категория, Комбинация, Действие)
+        shortcuts = [
+            ("Воспроизведение", "Space", "Пауза / Продолжить"),
+            ("Воспроизведение", "Ctrl + Enter", "Озвучить текст из поля ввода"),
+            ("Воспроизведение", "→  /  ←", "Следующая / Предыдущая реплика"),
+            ("Воспроизведение", "Ctrl + →  /  ←", "Перемотка на ±10 сек"),
+            ("Воспроизведение", "Shift + →  /  ←", "Переход к след. / пред. предложению"),
+            ("Воспроизведение", "R", "Повторить текущую реплику"),
+            ("Воспроизведение", "Ctrl + 1 / 2 / 3 / 4", "Скорость (1.0x / 1.25x / 1.5x / 2.0x)"),
+            ("Управление", "F1  /  Ctrl + H", "Справка по горячим клавишам"),
+            ("Управление", "Ctrl + , (запятая)", "Настройки программы"),
+            ("Управление", "Ctrl + M", "Режим «Не беспокоить» (тишина)"),
+            ("Управление", "Ctrl + T", "Панель инструментов (свернуть/развернуть)"),
+            ("Управление", "Ctrl + L", "Очистить поле своего текста"),
+            ("Управление", "Ctrl + I", "Фокус в поле ввода текста"),
+            ("Управление", "Ctrl + D", "Голосовая диктовка микрофоном"),
+            ("Управление", "Ctrl + E", "Редактировать текст реплики"),
+            ("Управление", "Ctrl + S", "Сохранить текущую озвучку в MP3"),
+            ("Очередь", "Ctrl + Del", "Удалить выбранную реплику"),
+            ("Очередь", "Ctrl + Shift + L", "Очистить всю очередь"),
+            ("Очередь", "Ctrl + F", "Поиск и фильтр по тексту"),
+            ("Очередь", "F5", "Подтянуть свежие диалоги ИИ"),
+            ("Очередь", "Esc", "Снять выделение / Закрыть поиск"),
+        ]
+
+        canvas = tk.Canvas(box, bg=c["panel"], highlightthickness=0)
+        sb = ttk.Scrollbar(box, orient="vertical", command=canvas.yview)
+        inner = ttk.Frame(canvas, style="Panel.TFrame", padding=10)
+        inner.columnconfigure(0, minsize=140)
+        inner.columnconfigure(1, weight=1)
+
+        canvas.create_window((0, 0), window=inner, anchor="nw")
+        canvas.configure(xscrollcommand=sb.set, yscrollcommand=sb.set)
+        canvas.pack(side="left", fill="both", expand=True)
+        sb.pack(side="right", fill="y")
+
+        def _on_cfg(e):
+            canvas.configure(scrollregion=canvas.bbox("all"))
+        inner.bind("<Configure>", _on_cfg)
+
+        for row_i, (cat, key_combo, desc) in enumerate(shortcuts):
+            k_lbl = tk.Label(inner, text=key_combo, font=("Segoe UI Semibold", 9), bg=c["panel2"], fg=c["signal"],
+                             padx=8, pady=3, relief="flat", bd=0)
+            k_lbl.grid(row=row_i, column=0, sticky="w", padx=(0, 10), pady=3)
+            d_lbl = ttk.Label(inner, text=f"({cat})  {desc}", style="TLabel")
+            d_lbl.grid(row=row_i, column=1, sticky="w", pady=3)
+
+        ttk.Button(w, text=vp_i18n.t("close"), style="Primary.TButton", command=w.destroy).pack(pady=10)
