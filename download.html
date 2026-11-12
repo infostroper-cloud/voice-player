@@ -1,0 +1,598 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Download VoicePlayer — Windows, macOS, Linux</title>
+  <meta name="description" content="Download VoicePlayer 1.2.0 for Windows 10/11, macOS (Apple Silicon & Intel), and Linux. Fast local AI speech player with instant setup." />
+  <link rel="icon" type="image/png" href="icon.png" />
+  <style>
+    :root {
+      --bg: #0d0f0e;
+      --panel: #131615;
+      --panel2: #1c211f;
+      --panel3: #222926;
+      --ink: #e8ecea;
+      --mute: #7c8782;
+      --signal: #00f0a8;
+      --signal-hover: #00d494;
+      --signal-dark: #0d4a36;
+      --sel: #143026;
+      --hairline: #242c29;
+      --radius: 12px;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: radial-gradient(circle at 50% 0%, #162922 0%, var(--bg) 60%);
+      color: var(--ink);
+      font-family: "Segoe UI", -apple-system, BlinkMacSystemFont, Inter, Roboto, sans-serif;
+      line-height: 1.6;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+    a { color: var(--signal); text-decoration: none; }
+    .container { max-width: 1080px; margin: 0 auto; padding: 0 24px; width: 100%; }
+
+    /* Navigation */
+    header {
+      border-bottom: 1px solid var(--hairline);
+      background: rgba(13, 15, 14, 0.85);
+      backdrop-filter: blur(14px);
+      position: sticky;
+      top: 0;
+      z-index: 50;
+    }
+    .nav {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      height: 68px;
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      font-weight: 700;
+      font-size: 1.15rem;
+      color: var(--ink);
+    }
+    .brand img { width: 34px; height: 34px; border-radius: 8px; }
+    .badge {
+      background: var(--sel);
+      color: var(--signal);
+      border: 1px solid rgba(0, 240, 168, 0.35);
+      padding: 2px 10px;
+      border-radius: 999px;
+      font-size: 0.75rem;
+      font-weight: 600;
+    }
+    .nav-right { display: flex; align-items: center; gap: 14px; }
+    .nav-link { color: var(--mute); font-size: 0.92rem; font-weight: 500; transition: color .15s; }
+    .nav-link:hover { color: var(--ink); }
+
+    .lang-select {
+      background: var(--panel2);
+      color: var(--ink);
+      border: 1px solid var(--hairline);
+      border-radius: 6px;
+      padding: 5px 8px;
+      font-size: 0.82rem;
+      cursor: pointer;
+    }
+
+    /* Main Content */
+    main { flex: 1; padding: 48px 0 64px; }
+    .hero { text-align: center; margin-bottom: 36px; }
+    .hero h1 { font-size: 2.4rem; font-weight: 800; letter-spacing: -0.02em; margin-bottom: 12px; }
+    .hero p { color: var(--mute); font-size: 1.1rem; max-width: 640px; margin: 0 auto; }
+
+    .os-banner {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: var(--sel);
+      border: 1px solid rgba(0, 240, 168, 0.4);
+      padding: 8px 18px;
+      border-radius: 999px;
+      color: var(--signal);
+      font-weight: 600;
+      font-size: 0.95rem;
+      margin-top: 18px;
+    }
+
+    /* OS Cards Grid */
+    .cards-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+      gap: 24px;
+      margin-top: 36px;
+    }
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--hairline);
+      border-radius: var(--radius);
+      padding: 28px;
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      transition: transform .2s, border-color .2s, box-shadow .2s;
+    }
+    .card.highlighted {
+      border-color: var(--signal);
+      box-shadow: 0 8px 30px rgba(0, 240, 168, 0.12);
+      transform: translateY(-2px);
+    }
+    .card-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 18px;
+    }
+    .card-icon {
+      font-size: 2.2rem;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .card-badge {
+      font-size: 0.75rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      padding: 4px 10px;
+      border-radius: 999px;
+    }
+    .badge-detected {
+      background: var(--signal);
+      color: #0d0f0e;
+    }
+    .badge-alt {
+      background: var(--panel2);
+      color: var(--mute);
+      border: 1px solid var(--hairline);
+    }
+    .card h2 { font-size: 1.4rem; font-weight: 700; margin-bottom: 8px; }
+    .card-desc { color: var(--mute); font-size: 0.92rem; margin-bottom: 22px; flex: 1; }
+
+    /* Buttons */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      padding: 12px 20px;
+      border-radius: 8px;
+      font-weight: 600;
+      font-size: 0.95rem;
+      cursor: pointer;
+      border: none;
+      transition: all .15s ease;
+      text-align: center;
+      text-decoration: none;
+      width: 100%;
+    }
+    .btn-primary {
+      background: var(--signal);
+      color: #0d0f0e;
+    }
+    .btn-primary:hover {
+      background: var(--signal-hover);
+      transform: translateY(-1px);
+    }
+    .btn-secondary {
+      background: var(--panel2);
+      color: var(--ink);
+      border: 1px solid var(--hairline);
+      margin-top: 10px;
+    }
+    .btn-secondary:hover {
+      background: var(--panel3);
+      border-color: var(--mute);
+    }
+
+    /* Terminal Command Box */
+    .code-box {
+      background: #090b0a;
+      border: 1px solid var(--hairline);
+      border-radius: 8px;
+      padding: 12px 14px;
+      margin: 14px 0;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+      font-size: 0.85rem;
+      color: #a4b3ac;
+      overflow-x: auto;
+    }
+    .code-box code { white-space: nowrap; }
+    .btn-copy {
+      background: var(--panel2);
+      border: 1px solid var(--hairline);
+      color: var(--ink);
+      padding: 6px 12px;
+      border-radius: 6px;
+      font-size: 0.78rem;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: background .15s;
+    }
+    .btn-copy:hover { background: var(--panel3); color: var(--signal); }
+
+    /* Channels / Telegram / Ko-fi */
+    .section-box {
+      background: var(--panel);
+      border: 1px solid var(--hairline);
+      border-radius: var(--radius);
+      padding: 30px;
+      margin-top: 36px;
+    }
+    .section-title { font-size: 1.25rem; font-weight: 700; margin-bottom: 12px; }
+    .section-desc { color: var(--mute); font-size: 0.95rem; margin-bottom: 20px; }
+
+    .channels-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 16px;
+    }
+    .channel-item {
+      background: var(--panel2);
+      border: 1px solid var(--hairline);
+      border-radius: 8px;
+      padding: 18px;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      transition: border-color .15s;
+    }
+    .channel-item:hover { border-color: var(--signal); }
+    .channel-icon { font-size: 1.8rem; }
+    .channel-info h3 { font-size: 1rem; font-weight: 600; color: var(--ink); margin-bottom: 2px; }
+    .channel-info p { font-size: 0.82rem; color: var(--mute); margin: 0; }
+
+    footer {
+      border-top: 1px solid var(--hairline);
+      padding: 24px 0;
+      text-align: center;
+      color: var(--mute);
+      font-size: 0.85rem;
+    }
+  </style>
+</head>
+<body>
+
+  <header>
+    <div class="container nav">
+      <a href="index.html" class="brand">
+        <img src="icon.png" alt="VoicePlayer" />
+        <span>VoicePlayer</span>
+        <span class="badge">v1.2.0</span>
+      </a>
+      <div class="nav-right">
+        <a href="index.html" class="nav-link" id="nav-home">Home</a>
+        <a href="https://github.com/infostroper-cloud/voice-player" target="_blank" rel="noopener" class="nav-link">GitHub</a>
+        <select id="langSelect" class="lang-select" onchange="changeLang(this.value)">
+          <option value="en">English</option>
+          <option value="ru">Русский</option>
+          <option value="es">Español</option>
+          <option value="zh">中文</option>
+          <option value="ja">日本語</option>
+          <option value="de">Deutsch</option>
+          <option value="fr">Français</option>
+          <option value="hi">हिन्दी</option>
+        </select>
+      </div>
+    </div>
+  </header>
+
+  <main class="container">
+    <div class="hero">
+      <h1 id="hero-title">Download VoicePlayer</h1>
+      <p id="hero-subtitle">Fast, local desktop speech synthesizer for AI coding assistants. Works offline with zero telemetry.</p>
+      <div class="os-banner" id="osBanner">
+        <span id="osBannerIcon">💻</span>
+        <span id="osBannerText">Detecting your operating system...</span>
+      </div>
+    </div>
+
+    <div class="cards-grid">
+      <!-- Windows Card -->
+      <div class="card" id="card-win">
+        <div class="card-top">
+          <div class="card-icon">🪟</div>
+          <span class="card-badge badge-alt" id="badge-win">Windows</span>
+        </div>
+        <h2 id="win-title">Windows</h2>
+        <p class="card-desc" id="win-desc">Windows 10 and Windows 11 (64-bit). Includes auto-updater, desktop shortcut, and taskbar integration.</p>
+        <a href="https://github.com/infostroper-cloud/voice-player/releases/download/voice-player-v1.2.0/VoicePlayer-Setup-1.2.0.exe" class="btn btn-primary" id="btn-win-exe">
+          ⬇ Download Installer (.exe)
+        </a>
+        <a href="https://github.com/infostroper-cloud/voice-player/releases/download/voice-player-v1.2.0/voice-player-1.2.0.zip" class="btn btn-secondary" id="btn-win-zip">
+          📦 Portable Archive (.zip, 200 KB)
+        </a>
+      </div>
+
+      <!-- macOS Card -->
+      <div class="card" id="card-mac">
+        <div class="card-top">
+          <div class="card-icon">🍎</div>
+          <span class="card-badge badge-alt" id="badge-mac">macOS</span>
+        </div>
+        <h2 id="mac-title">macOS</h2>
+        <p class="card-desc" id="mac-desc">Apple Silicon (M1/M2/M3/M4) & Intel. One-line terminal install with launcher icon and dependencies.</p>
+        <div class="code-box">
+          <code id="mac-cmd">curl -fsSL https://raw.githubusercontent.com/infostroper-cloud/voice-player/main/install.sh | bash</code>
+          <button class="btn-copy" onclick="copyCmd('mac-cmd', this)">Copy</button>
+        </div>
+        <a href="https://github.com/infostroper-cloud/voice-player/releases/download/voice-player-v1.2.0/VoicePlayer-1.2.0-macos-linux.tar.gz" class="btn btn-secondary" id="btn-mac-tar">
+          📦 Standalone Archive (.tar.gz)
+        </a>
+      </div>
+
+      <!-- Linux Card -->
+      <div class="card" id="card-linux">
+        <div class="card-top">
+          <div class="card-icon">🐧</div>
+          <span class="card-badge badge-alt" id="badge-linux">Linux</span>
+        </div>
+        <h2 id="linux-title">Linux</h2>
+        <p class="card-desc" id="linux-desc">Ubuntu, Debian, Fedora, Arch & others. Installs to ~/.voice-player with .desktop app launcher.</p>
+        <div class="code-box">
+          <code id="linux-cmd">curl -fsSL https://raw.githubusercontent.com/infostroper-cloud/voice-player/main/install.sh | bash</code>
+          <button class="btn-copy" onclick="copyCmd('linux-cmd', this)">Copy</button>
+        </div>
+        <a href="https://github.com/infostroper-cloud/voice-player/releases/download/voice-player-v1.2.0/VoicePlayer-1.2.0-macos-linux.tar.gz" class="btn btn-secondary" id="btn-linux-tar">
+          📦 Standalone Archive (.tar.gz)
+        </a>
+      </div>
+    </div>
+
+    <!-- Direct Telegram & Global Distribution -->
+    <div class="section-box">
+      <div class="section-title" id="sec-dist-title">Direct Downloads & Channels</div>
+      <div class="section-desc" id="sec-dist-desc">Installers are mirrored directly on Telegram and GitHub Releases for unrestricted global access.</div>
+      <div class="channels-grid">
+        <a href="https://t.me/voiceplayer_ai" target="_blank" rel="noopener" class="channel-item">
+          <div class="channel-icon">✈️</div>
+          <div class="channel-info">
+            <h3 id="tg-title">Telegram Channel</h3>
+            <p id="tg-desc">@voiceplayer_ai — Direct .exe, .tar.gz & quick updates</p>
+          </div>
+        </a>
+        <a href="https://github.com/infostroper-cloud/voice-player/releases" target="_blank" rel="noopener" class="channel-item">
+          <div class="channel-icon">🐙</div>
+          <div class="channel-info">
+            <h3 id="gh-title">GitHub Releases</h3>
+            <p id="gh-desc">Source code, release notes & SHA-256 checksums</p>
+          </div>
+        </a>
+      </div>
+    </div>
+
+    <!-- International Support & Payments -->
+    <div class="section-box">
+      <div class="section-title" id="sec-pay-title">Support & Global Donations</div>
+      <div class="section-desc" id="sec-pay-desc">VoicePlayer is free and open-source. You can support continued development from anywhere in the world:</div>
+      <div class="channels-grid">
+        <a href="https://ko-fi.com/voiceplayer" target="_blank" rel="noopener" class="channel-item">
+          <div class="channel-icon">☕</div>
+          <div class="channel-info">
+            <h3>Ko-fi (International)</h3>
+            <p>PayPal, Visa, Mastercard, Google Pay (No fee)</p>
+          </div>
+        </a>
+        <a href="https://voiceplayer.lemonsqueezy.com" target="_blank" rel="noopener" class="channel-item">
+          <div class="channel-icon">🍋</div>
+          <div class="channel-info">
+            <h3>LemonSqueezy</h3>
+            <p>Global card payments & official software supporter licenses</p>
+          </div>
+        </a>
+        <a href="https://boosty.to/voiceplayer" target="_blank" rel="noopener" class="channel-item">
+          <div class="channel-icon">🚀</div>
+          <div class="channel-info">
+            <h3>Boosty (RU & CIS)</h3>
+            <p>Карты РФ, СБП, ЮMoney для разработчиков из СНГ</p>
+          </div>
+        </a>
+      </div>
+    </div>
+  </main>
+
+  <footer>
+    <div class="container">
+      VoicePlayer 1.2.0 • Open-Source MIT License • Local Neural Speech for AI Coders
+    </div>
+  </footer>
+
+  <script>
+    // Copy helper
+    function copyCmd(id, btn) {
+      const text = document.getElementById(id).innerText;
+      navigator.clipboard.writeText(text).then(() => {
+        const orig = btn.innerText;
+        btn.innerText = "✓ Copied!";
+        setTimeout(() => btn.innerText = orig, 2000);
+      });
+    }
+
+    // OS Detection
+    function detectOS() {
+      const ua = navigator.userAgent || "";
+      const platform = navigator.userAgentData?.platform || navigator.platform || "";
+      
+      let os = "win";
+      let osName = "Windows 10 / 11";
+      let icon = "🪟";
+
+      if (/Mac|iPhone|iPad|iPod/i.test(platform) || /Macintosh|Mac OS X/i.test(ua)) {
+        os = "mac";
+        osName = "macOS (Apple Silicon & Intel)";
+        icon = "🍎";
+      } else if (/Linux/i.test(platform) || /Linux|X11/i.test(ua)) {
+        os = "linux";
+        osName = "Linux (Ubuntu / Debian / Fedora / Arch)";
+        icon = "🐧";
+      }
+
+      // Highlight corresponding card
+      const winCard = document.getElementById("card-win");
+      const macCard = document.getElementById("card-mac");
+      const linuxCard = document.getElementById("card-linux");
+
+      winCard.classList.remove("highlighted");
+      macCard.classList.remove("highlighted");
+      linuxCard.classList.remove("highlighted");
+
+      const badgeWin = document.getElementById("badge-win");
+      const badgeMac = document.getElementById("badge-mac");
+      const badgeLinux = document.getElementById("badge-linux");
+
+      badgeWin.className = "card-badge badge-alt";
+      badgeMac.className = "card-badge badge-alt";
+      badgeLinux.className = "card-badge badge-alt";
+
+      if (os === "win") {
+        winCard.classList.add("highlighted");
+        badgeWin.className = "card-badge badge-detected";
+        badgeWin.innerText = "Recommended for you";
+      } else if (os === "mac") {
+        macCard.classList.add("highlighted");
+        badgeMac.className = "card-badge badge-detected";
+        badgeMac.innerText = "Recommended for you";
+      } else if (os === "linux") {
+        linuxCard.classList.add("highlighted");
+        badgeLinux.className = "card-badge badge-detected";
+        badgeLinux.innerText = "Recommended for you";
+      }
+
+      const banner = document.getElementById("osBanner");
+      const bannerIcon = document.getElementById("osBannerIcon");
+      const bannerText = document.getElementById("osBannerText");
+      bannerIcon.innerText = icon;
+      bannerText.innerText = `Detected for your device: ${osName}`;
+    }
+
+    // Multilingual Dictionary
+    const i18n = {
+      ru: {
+        title: "Скачать VoicePlayer — Windows, macOS, Linux",
+        navHome: "Главная",
+        heroTitle: "Скачать VoicePlayer",
+        heroSub: "Быстрый локальный голосовой плеер для AI-ассистентов разработки. Работает офлайн без подписок.",
+        osPrefix: "Определено для вашего устройства: ",
+        recBadge: "Рекомендуется для вас",
+        winTitle: "Windows",
+        winDesc: "Windows 10 и Windows 11 (64-бит). Автоматическая установка, автообновление, ярлыки и закрепление на панели.",
+        btnWinExe: "⬇ Скачать установщик (.exe)",
+        btnWinZip: "📦 Портативный архив (.zip, 200 КБ)",
+        macTitle: "macOS",
+        macDesc: "Apple Silicon (M1/M2/M3/M4) и Intel. Установка в 1 команду терминала с созданием ярлыка приложения.",
+        btnMacTar: "📦 Отдельный архив (.tar.gz)",
+        linuxTitle: "Linux",
+        linuxDesc: "Ubuntu, Debian, Fedora, Arch и др. Установка в ~/.voice-player и интеграция в меню приложений (.desktop).",
+        btnLinuxTar: "📦 Отдельный архив (.tar.gz)",
+        secDistTitle: "Прямые загрузки и каналы",
+        secDistDesc: "Все установочные файлы опубликованы напрямую в Telegram и на GitHub Releases.",
+        tgTitle: "Telegram-канал",
+        tgDesc: "@voiceplayer_ai — Прямые файлы .exe, .tar.gz и свежие релизы",
+        ghTitle: "GitHub Releases",
+        ghDesc: "Исходный код, changelog и контрольные суммы SHA-256",
+        secPayTitle: "Поддержка и международная оплата",
+        secPayDesc: "VoicePlayer полностью бесплатен. Вы можете поддержать проект из любой страны:"
+      },
+      es: {
+        title: "Descargar VoicePlayer — Windows, macOS, Linux",
+        navHome: "Inicio",
+        heroTitle: "Descargar VoicePlayer",
+        heroSub: "Reproductor de voz local rápido para asistentes de IA. Funciona sin conexión y sin suscripciones.",
+        osPrefix: "Detectado para tu dispositivo: ",
+        recBadge: "Recomendado para ti",
+        winTitle: "Windows",
+        winDesc: "Windows 10 y 11 (64 bits). Instalador con actualización automática e integración en barra de tareas.",
+        btnWinExe: "⬇ Descargar instalador (.exe)",
+        btnWinZip: "📦 Archivo portable (.zip, 200 KB)",
+        macTitle: "macOS",
+        macDesc: "Apple Silicon (M1–M4) e Intel. Instalación en 1 comando de terminal con lanzador de aplicaciones.",
+        btnMacTar: "📦 Archivo independiente (.tar.gz)",
+        linuxTitle: "Linux",
+        linuxDesc: "Ubuntu, Debian, Fedora, Arch y más. Se instala en ~/.voice-player con acceso directo .desktop.",
+        btnLinuxTar: "📦 Archivo independiente (.tar.gz)",
+        secDistTitle: "Descargas directas y canales",
+        secDistDesc: "Archivos de instalación disponibles directamente en Telegram y GitHub Releases.",
+        tgTitle: "Canal de Telegram",
+        tgDesc: "@voiceplayer_ai — Archivos directos y actualizaciones",
+        ghTitle: "GitHub Releases",
+        ghDesc: "Código fuente, notas de la versión y sumas SHA-256",
+        secPayTitle: "Apoyo y donaciones globales",
+        secPayDesc: "VoicePlayer es de código abierto. Puedes apoyar el desarrollo desde cualquier país:"
+      },
+      zh: {
+        title: "下载 VoicePlayer — Windows, macOS, Linux",
+        navHome: "首页",
+        heroTitle: "下载 VoicePlayer",
+        heroSub: "专为 AI 编程助手设计的快速本地语音播放器。离线运行，无需订阅。",
+        osPrefix: "已为您设备检测到：",
+        recBadge: "为您推荐",
+        winTitle: "Windows",
+        winDesc: "Windows 10 和 Windows 11 (64位)。包含自动更新程序、桌面快捷方式和任务栏集成。",
+        btnWinExe: "⬇ 下载安装包 (.exe)",
+        btnWinZip: "📦 便携版压缩包 (.zip, 200 KB)",
+        macTitle: "macOS",
+        macDesc: "支持 Apple Silicon (M1–M4) 和 Intel。单行终端命令安装并创建快捷方式。",
+        btnMacTar: "📦 独立安装包 (.tar.gz)",
+        linuxTitle: "Linux",
+        linuxDesc: "支持 Ubuntu、Debian、Fedora、Arch 等。安装到 ~/.voice-player 并生成 .desktop 启动图标。",
+        btnLinuxTar: "📦 独立安装包 (.tar.gz)",
+        secDistTitle: "直接下载与发布频道",
+        secDistDesc: "安装程序已直接镜像发布在 Telegram 和 GitHub Releases 上。",
+        tgTitle: "Telegram 频道",
+        tgDesc: "@voiceplayer_ai — 直接下载 .exe、.tar.gz 和最新动态",
+        ghTitle: "GitHub Releases",
+        ghDesc: "源代码、更新日志和 SHA-256 校验码",
+        secPayTitle: "支持与全球赞助",
+        secPayDesc: "VoicePlayer 完全免费开源。欢迎来自全球的开发者赞助与支持："
+      }
+    };
+
+    function changeLang(lang) {
+      const t = i18n[lang];
+      if (!t) return;
+      document.title = t.title;
+      document.getElementById("nav-home").innerText = t.navHome;
+      document.getElementById("hero-title").innerText = t.heroTitle;
+      document.getElementById("hero-subtitle").innerText = t.heroSub;
+      document.getElementById("win-title").innerText = t.winTitle;
+      document.getElementById("win-desc").innerText = t.winDesc;
+      document.getElementById("btn-win-exe").innerText = t.btnWinExe;
+      document.getElementById("btn-win-zip").innerText = t.btnWinZip;
+      document.getElementById("mac-title").innerText = t.macTitle;
+      document.getElementById("mac-desc").innerText = t.macDesc;
+      document.getElementById("btn-mac-tar").innerText = t.btnMacTar;
+      document.getElementById("linux-title").innerText = t.linuxTitle;
+      document.getElementById("linux-desc").innerText = t.linuxDesc;
+      document.getElementById("btn-linux-tar").innerText = t.btnLinuxTar;
+      document.getElementById("sec-dist-title").innerText = t.secDistTitle;
+      document.getElementById("sec-dist-desc").innerText = t.secDistDesc;
+      document.getElementById("tg-title").innerText = t.tgTitle;
+      document.getElementById("tg-desc").innerText = t.tgDesc;
+      document.getElementById("gh-title").innerText = t.ghTitle;
+      document.getElementById("gh-desc").innerText = t.ghDesc;
+      document.getElementById("sec-pay-title").innerText = t.secPayTitle;
+      document.getElementById("sec-pay-desc").innerText = t.secPayDesc;
+    }
+
+    // Auto-detect browser language
+    window.addEventListener("DOMContentLoaded", () => {
+      detectOS();
+      const navLang = (navigator.language || navigator.userLanguage || "en").slice(0, 2).toLowerCase();
+      if (["ru", "es", "zh"].includes(navLang)) {
+        document.getElementById("langSelect").value = navLang;
+        changeLang(navLang);
+      }
+    });
+  </script>
+</body>
+</html>
