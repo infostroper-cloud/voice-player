@@ -2538,7 +2538,7 @@ class VoicePlayerApp:
     def _restore_sashes(self):
         saved = self.prefs.get("sashes") or []
         try:
-            target = int(saved[0]) if (saved and 360 <= int(saved[0]) <= 680) else 470
+            target = int(saved[0]) if (saved and 420 <= int(saved[0]) <= 720) else 480
             if len(self.body.panes()) >= 2:
                 self.body.sashpos(0, target)
         except Exception:
@@ -2549,9 +2549,9 @@ class VoicePlayerApp:
         try:
             if len(self.body.panes()) >= 2 and self.body.winfo_width() >= 600:
                 cur = int(self.body.sashpos(0))
-                if cur < 340:
+                if cur < 420:
                     saved = self.prefs.get("sashes") or []
-                    target = int(saved[0]) if (saved and 360 <= int(saved[0]) <= 680) else 470
+                    target = int(saved[0]) if (saved and 420 <= int(saved[0]) <= 720) else 480
                     self.body.sashpos(0, target)
         except Exception:
             pass
@@ -2878,7 +2878,12 @@ class VoicePlayerApp:
                 cur_mode_idx = self._get_mode_index()
                 m_vals = self._get_mode_values()
                 self.cmb_mode["values"] = m_vals
-                self.var_mode.set(m_vals[cur_mode_idx if 0 <= cur_mode_idx < len(m_vals) else 0])
+                idx = cur_mode_idx if 0 <= cur_mode_idx < len(m_vals) else 0
+                self.var_mode.set(m_vals[idx])
+                try:
+                    self.cmb_mode.current(idx)
+                except Exception:
+                    pass
 
             # Фильтры автора, даты и сброса
             if hasattr(self, "lbl_filt_author"):
@@ -2888,9 +2893,9 @@ class VoicePlayerApp:
             if hasattr(self, "btn_filt_reset"):
                 self.btn_filt_reset.configure(text=vp_i18n.t("reset"))
             ALL_FILTER_VALUES = {"все", "all", "todos", "全部", "सभी", "すべて", "alle", "tous", ""}
-            if hasattr(self, "var_filter_author") and self.var_filter_author.get() in ALL_FILTER_VALUES:
+            if hasattr(self, "var_filter_author") and self.var_filter_author.get().strip().lower() in ALL_FILTER_VALUES:
                 self.var_filter_author.set(vp_i18n.t("filter_all"))
-            if hasattr(self, "var_filter_date") and self.var_filter_date.get() in ALL_FILTER_VALUES:
+            if hasattr(self, "var_filter_date") and self.var_filter_date.get().strip().lower() in ALL_FILTER_VALUES:
                 self.var_filter_date.set(vp_i18n.t("filter_all"))
             if hasattr(self, "lbl_now_prompt") and hasattr(self, "prompt_frame") and self.prompt_frame.winfo_ismapped():
                 cur_item = self.queue_items[self.current_idx] if 0 <= self.current_idx < len(self.queue_items) else None
@@ -2908,9 +2913,43 @@ class VoicePlayerApp:
                     pass
 
             if hasattr(self, "var_sleep"):
-                off_states = {"выкл", "off", "desactivado", "关闭", "बंद", "オフ", "aus", "désactivé", ""}
-                if str(self.var_sleep.get()).lower() in off_states:
+                off_states = {"выкл", "off", "desactivado", "关闭", "बंद", "オフ", "aus", "désactivé", "0", ""}
+                cur_s = str(self.var_sleep.get()).strip()
+                if any(cur_s.lower().startswith(x) for x in off_states):
                     self.var_sleep.set(vp_i18n.t("off"))
+                else:
+                    digits = "".join(c for c in cur_s if c.isdigit())
+                    if digits:
+                        self.var_sleep.set(f"{digits} {vp_i18n.t('min_short')}")
+
+            # Перевод подсказок кнопок транспорта и шапки
+            if hasattr(self, "btn_preview_voice"):
+                self._tt(self.btn_preview_voice, vp_i18n.t("listen_selected_voice"))
+            if hasattr(self, "btn_toggle"):
+                self._tt(self.btn_toggle, vp_i18n.translate_tip("Пауза / продолжить (Пробел)"))
+            if hasattr(self, "btn_prev_ctrl"):
+                self._tt(self.btn_prev_ctrl, vp_i18n.translate_tip("Предыдущая реплика (←)"))
+            if hasattr(self, "btn_next_ctrl"):
+                self._tt(self.btn_next_ctrl, vp_i18n.translate_tip("Следующая реплика (→)"))
+            if hasattr(self, "btn_repeat_ctrl"):
+                self._tt(self.btn_repeat_ctrl, vp_i18n.translate_tip("Повторить текущую с начала (R)"))
+            if hasattr(self, "btn_listenall_ctrl"):
+                self._tt(self.btn_listenall_ctrl, vp_i18n.translate_tip("Слушать всё подряд — непрослушанные по очереди"))
+            if hasattr(self, "btn_filt_reset"):
+                self._tt(self.btn_filt_reset, vp_i18n.translate_tip("Сбросить фильтры автора и даты"))
+            if hasattr(self, "_src_pill_btns") and isinstance(self._src_pill_btns, dict):
+                for sk, tip_k in (("all", "tip_tab_all"), ("ai", "tip_tab_ai"), ("board", "tip_tab_board"), ("favorite", "tip_tab_fav")):
+                    if sk in self._src_pill_btns:
+                        self._tt(self._src_pill_btns[sk], vp_i18n.t(tip_k))
+            if hasattr(self, "btn_ai_top"):
+                self.btn_ai_top.configure(text="🤖 " + vp_i18n.t("tab_ai"))
+                self._tt(self.btn_ai_top, vp_i18n.translate_tip("Какие нейросети озвучивать (Antigravity, Codex, Claude Code…)"))
+            if hasattr(self, "btn_theme"):
+                self._tt(self.btn_theme, vp_i18n.translate_tip("Переключить тему (Тёмная / Светлая)"))
+            if hasattr(self, "btn_support"):
+                self._tt(self.btn_support, vp_i18n.translate_tip("О проекте VoicePlayer · Статистика прослушивания · Поддержать разработку"))
+            if hasattr(self, "btn_listmenu"):
+                self._tt(self.btn_listmenu, vp_i18n.translate_tip("Действия со списком: подтянуть диалоги, слушать всё, поиск, очистка"))
 
             # Пересоздать контекстное меню и меню списка с локализованными пунктами
             try:
@@ -3338,19 +3377,19 @@ class VoicePlayerApp:
         # Левая группа: ⏮ ▶/⏸ ⏭ 🔁 ⏩
         ctrl = ttk.Frame(transport_bar)
         ctrl.grid(row=0, column=0, sticky="w", padx=(0, 12))
-        self._icon_button(ctrl, "prev", self.action_prev, "Предыдущая реплика (←)", width=3
-                          ).pack(side="left", padx=(0, 4))
+        self.btn_prev_ctrl = self._icon_button(ctrl, "prev", self.action_prev, "Предыдущая реплика (←)", width=3)
+        self.btn_prev_ctrl.pack(side="left", padx=(0, 4))
         self.btn_toggle = ttk.Button(ctrl, text=self._g_play, width=4, command=self.action_toggle,
                                      style="Transport.TButton")
         self.btn_toggle.pack(side="left", padx=2)
         self._tt(self.btn_toggle, "Пауза / продолжить (Пробел)")
-        self._icon_button(ctrl, "next", self.action_next, "Следующая реплика (→)", width=3
-                          ).pack(side="left", padx=(4, 0))
-        self._icon_button(ctrl, "repeat", self.action_repeat, "Повторить текущую с начала (R)", width=3
-                          ).pack(side="left", padx=(4, 0))
-        self._icon_button(ctrl, "listenall", self._listen_all,
-                          "Слушать всё подряд — непрослушанные по очереди", width=3
-                          ).pack(side="left", padx=(4, 0))
+        self.btn_next_ctrl = self._icon_button(ctrl, "next", self.action_next, "Следующая реплика (→)", width=3)
+        self.btn_next_ctrl.pack(side="left", padx=(4, 0))
+        self.btn_repeat_ctrl = self._icon_button(ctrl, "repeat", self.action_repeat, "Повторить текущую с начала (R)", width=3)
+        self.btn_repeat_ctrl.pack(side="left", padx=(4, 0))
+        self.btn_listenall_ctrl = self._icon_button(ctrl, "listenall", self._listen_all,
+                          "Слушать всё подряд — непрослушанные по очереди", width=3)
+        self.btn_listenall_ctrl.pack(side="left", padx=(4, 0))
 
         # Центральная группа: время + широкая волновая дорожка (waveform) + длительность
         seek_row = ttk.Frame(transport_bar)
@@ -3387,8 +3426,9 @@ class VoicePlayerApp:
         vcb.pack(side="left", padx=(8, 4))
         vcb.bind("<<ComboboxSelected>>", self._on_voice_change)
         self._tt(vcb, "Голос озвучки («На компьютере» — локальный Piper, работает без интернета)")
-        self._tt(ttk.Button(rctrl, text="▶", width=2, style="Toggle.TButton", command=self._preview_voice),
-                 "Прослушать выбранный голос").pack(side="left", padx=(0, 6))
+        self.btn_preview_voice = ttk.Button(rctrl, text="▶", width=2, style="Toggle.TButton", command=self._preview_voice)
+        self.btn_preview_voice.pack(side="left", padx=(0, 6))
+        self._tt(self.btn_preview_voice, vp_i18n.t("listen_selected_voice"))
 
         self.var_adv_open = tk.BooleanVar(value=bool(self.prefs.get("adv_open", False)))
         self.btn_adv = ttk.Button(rctrl, text="⋯", width=3, style="Toggle.TButton",
@@ -3470,7 +3510,7 @@ class VoicePlayerApp:
         self.btn_theme.pack(side="left", padx=(0, 4))
         self._tt(self.btn_theme, "Переключить тему (Тёмная / Светлая)")
 
-        self.btn_ai_top = ttk.Button(hbtns, text="🤖 ИИ", width=6, style="Toggle.TButton",
+        self.btn_ai_top = ttk.Button(hbtns, text="🤖 " + vp_i18n.t("tab_ai"), style="Toggle.TButton",
                                      command=self._open_ai_dialog)
         self.btn_ai_top.pack(side="left", padx=(0, 4))
         self._tt(self.btn_ai_top, "Какие нейросети озвучивать (Antigravity, Codex, Claude Code…)")
@@ -3539,7 +3579,7 @@ class VoicePlayerApp:
                                      state="readonly", width=10, values=[vp_i18n.t("filter_all")])
         self.cmb_date.pack(side="left", padx=(4, 8))
         self.cmb_date.bind("<<ComboboxSelected>>", lambda e: self._render_list())
-        self.btn_filt_reset = ttk.Button(filt, text=vp_i18n.t("reset"), width=6, command=self._reset_filters,
+        self.btn_filt_reset = ttk.Button(filt, text=vp_i18n.t("reset"), width=8, command=self._reset_filters,
                                          style="Toggle.TButton")
         self.btn_filt_reset.pack(side="left")
 
@@ -3941,11 +3981,12 @@ class VoicePlayerApp:
         threading.Thread(target=self._preload_whisper, daemon=True, name="whisper-preload").start()
 
     def _on_sleep_change(self, _e=None):
-        v = self.var_sleep.get()
-        if v == vp_i18n.t("off") or v in ("выкл", "off", "desactivado", "关闭", "オフ", "Aus", "désactivé"):
+        v = str(self.var_sleep.get()).strip()
+        if any(v.lower().startswith(x) for x in ("выкл", "off", "desactivado", "关闭", "オフ", "aus", "désactivé", "0", "")):
             self._set_sleep_timer(0)
         else:
-            try: self._set_sleep_timer(int(v.split()[0]))
+            digits = "".join(c for c in v if c.isdigit())
+            try: self._set_sleep_timer(int(digits) if digits else 0)
             except Exception: self._set_sleep_timer(0)
 
     def _on_accent_change(self, _e=None):
@@ -4837,15 +4878,15 @@ class VoicePlayerApp:
             vp_i18n.t("tab_updates"),
         ]
         needed_w = sum(len(t) * 9 + 32 for t in tab_titles) + 60
-        win_w = max(860, min(1100, needed_w + 50))
-        win_h = 560
+        win_w = max(940, min(1200, needed_w + 60))
+        win_h = 580
         win.transient(self.root); win.configure(bg=c["bg"]); self._center_over_root(win, win_w, win_h)
-        win.minsize(win_w, win_h)
+        win.minsize(940, 560)
         win.resizable(True, True)
 
         style = ttk.Style()
         style.configure("TNotebook", background=c["bg"], borderwidth=0)
-        style.configure("TNotebook.Tab", background=c["panel2"], foreground=c["ink"], padding=(12, 6))
+        style.configure("TNotebook.Tab", background=c["panel2"], foreground=c["ink"], padding=(10, 5), font=("Segoe UI", 9))
         style.map("TNotebook.Tab", background=[("selected", c["panel"])], foreground=[("selected", c["ink"])])
         nb = ttk.Notebook(win); nb.pack(fill="both", expand=True, padx=10, pady=10)
 
@@ -4871,9 +4912,15 @@ class VoicePlayerApp:
         ttk.Label(t1, text=vp_i18n.t("opt_sleep_timer")).grid(row=5, column=0, sticky="w", pady=(10, 0))
         off_lbl = vp_i18n.t("off")
         m_lbl = vp_i18n.t("min_short")
-        cur_slp = self.var_sleep.get()
-        if cur_slp in ("выкл", "off", "desactivado", "关闭", "बंद", "オフ", "Aus", "désactivé", ""):
+        cur_slp = str(self.var_sleep.get()).strip()
+        if any(cur_slp.lower().startswith(x) for x in ("выкл", "off", "desactivado", "关闭", "बंद", "オフ", "aus", "désactivé", "0", "")):
             self.var_sleep.set(off_lbl)
+        else:
+            digits = "".join(c for c in cur_slp if c.isdigit())
+            if digits:
+                self.var_sleep.set(f"{digits} {m_lbl}")
+            else:
+                self.var_sleep.set(off_lbl)
         slp_opts = [off_lbl, f"15 {m_lbl}", f"30 {m_lbl}", f"45 {m_lbl}", f"60 {m_lbl}", f"90 {m_lbl}"]
         slp = ttk.Combobox(t1, textvariable=self.var_sleep, state="readonly", width=12, values=slp_opts)
         slp.grid(row=5, column=1, sticky="ew", pady=(10, 0)); slp.bind("<<ComboboxSelected>>", self._on_sleep_change)
@@ -6668,18 +6715,18 @@ class VoicePlayerApp:
             all_lbl = vp_i18n.t("filter_all")
             authors = sorted({self._disp_author(m.author) for m in self.queue_items if not m.deleted and m.author})
             self.cmb_author.configure(values=[all_lbl] + authors)
-            cur_fa = self.var_filter_author.get()
+            cur_fa = self.var_filter_author.get().strip().lower()
             if cur_fa in ALL_FILTER_VALUES:
                 self.var_filter_author.set(all_lbl)
-            elif cur_fa not in ([all_lbl] + authors):
+            elif cur_fa not in [a.lower() for a in ([all_lbl] + authors)]:
                 self.var_filter_author.set(all_lbl)
 
             dates = sorted({m.date_str for m in self.queue_items if not m.deleted and m.date_str})
             self.cmb_date.configure(values=[all_lbl] + dates)
-            cur_fd = self.var_filter_date.get()
+            cur_fd = self.var_filter_date.get().strip().lower()
             if cur_fd in ALL_FILTER_VALUES:
                 self.var_filter_date.set(all_lbl)
-            elif cur_fd not in ([all_lbl] + dates):
+            elif cur_fd not in [d.lower() for d in ([all_lbl] + dates)]:
                 self.var_filter_date.set(all_lbl)
         except Exception:
             pass
@@ -7815,7 +7862,7 @@ class VoicePlayerApp:
         if not txt:
             self._set_status("поле пустое — вставь текст", ok=False)
             return
-        item = self.enqueue(source="manual", author="Мой текст",
+        item = self.enqueue(source="manual", author=vp_i18n.t("custom_text_author"),
                             time_str=time.strftime("%H:%M"), text=txt, dedup=False)
         self._speak_now(item, "текст")
         try:
