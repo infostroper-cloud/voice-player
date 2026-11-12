@@ -229,6 +229,118 @@ except Exception as _e:  # библиотек нет — останемся на
     _STREAM_IMPORT_ERR = str(_e)
 
 
+
+class AfPlayer:
+    """Нативный аудиоплеер для macOS (afplay) и Linux (aplay/ffplay/mpv) без внешних C-библиотек."""
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._proc = None
+        self._paused = False
+        self._volume = 1.0
+        self._speed = 1.0
+        self._cur_path = None
+        self._start_time = 0.0
+        self._duration = 0.0
+
+    def load_and_play(self, path: Path, speed: float = 1.0):
+        with self._lock:
+            self.stop()
+            self._cur_path = Path(path)
+            self._speed = max(0.5, min(2.5, speed))
+            self._start_time = time.time()
+            # Попробуем оценить длительность через ffprobe или miniaudio
+            self._duration = 0.0
+            if _MINIAUDIO_OK:
+                try:
+                    info = _ma.get_file_info(str(path))
+                    self._duration = float(info.duration)
+                except Exception:
+                    pass
+            cmd = []
+            if sys.platform == "darwin":
+                # afplay встроен в macOS: поддерживает темп -r и громкость -v (шкала 0..1)
+                cmd = ["/usr/bin/afplay", "-r", f"{self._speed:g}", "-v", f"{self._volume:g}", str(path)]
+            elif shutil.which("mpv"):
+                cmd = ["mpv", "--no-video", f"--speed={self._speed:g}", f"--volume={int(self._volume*100)}", str(path)]
+            elif shutil.which("ffplay"):
+                cmd = ["ffplay", "-nodisp", "-autoexit", "-af", f"atempo={self._speed:g},volume={self._volume:g}", str(path)]
+            elif shutil.which("aplay"):
+                cmd = ["aplay", "-q", str(path)]
+            if cmd:
+                try:
+                    self._proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                except Exception as e:
+                    log_line(f"AfPlayer popen error: {e}")
+                    self._proc = None
+
+    def pause(self):
+        with self._lock:
+            if self._proc and self._proc.poll() is None and not self._paused:
+                try:
+                    self._proc.send_signal(signal.SIGSTOP)
+                    self._paused = True
+                except Exception:
+                    pass
+
+    def resume(self):
+        with self._lock:
+            if self._proc and self._proc.poll() is None and self._paused:
+                try:
+                    self._proc.send_signal(signal.SIGCONT)
+                    self._paused = False
+                except Exception:
+                    pass
+
+    def stop(self):
+        with self._lock:
+            if self._proc:
+                try:
+                    if self._proc.poll() is None:
+                        self._proc.terminate()
+                        self._proc.wait(timeout=0.3)
+                except Exception:
+                    try:
+                        self._proc.kill()
+                    except Exception:
+                        pass
+                self._proc = None
+            self._paused = False
+
+    def set_volume(self, v: float):
+        self._volume = max(0.0, min(1.0, v))
+
+    def is_paused(self) -> bool:
+        return self._paused
+
+    def is_playing(self) -> bool:
+        with self._lock:
+            if not self._proc:
+                return False
+            return self._proc.poll() is None and not self._paused
+
+    def has_track(self) -> bool:
+        return self._cur_path is not None
+
+    def is_finished(self) -> bool:
+        with self._lock:
+            if not self._proc:
+                return True
+            return self._proc.poll() is not None
+
+    def set_speed(self, mult: float):
+        self._speed = max(0.5, min(2.5, mult))
+        if self.is_playing() and self._cur_path:
+            self.load_and_play(self._cur_path, self._speed)
+
+    def duration(self) -> float:
+        return self._duration
+
+    def position(self) -> float:
+        if self._start_time > 0 and self.is_playing():
+            return (time.time() - self._start_time) * self._speed
+        return 0.0
+
+
 class StreamPlayer:
     """Плеер с time-stretch: скорость 0.5–2.0× меняется на лету без пересоздания файла
     и без изменения высоты голоса. Тяжёлый стретч идёт в фоновом воркере, поэтому ни
@@ -2159,13 +2271,15 @@ class VoicePlayerApp:
                 log_line(f"backend=StreamPlayer, output='{_dev['name']}'")
             except Exception as e:
                 log_line(f"backend=StreamPlayer, output device unknown: {e}")
-        else:
+        elif IS_WIN and _winmm is not None:
             self.player = MciPlayer()
             self._stream_backend = False
             log_line(f"backend=MCI (StreamPlayer недоступен: {_STREAM_IMPORT_ERR})")
+        else:
+            self.player = AfPlayer()
+            self._stream_backend = False
+            log_line("backend=AfPlayer (нативный системный плеер macOS/Linux)")
         self.player.set_volume(self.var_volume.get())
-        if not _STREAM_OK and _winmm is None:
-            messagebox.showerror(APP_NAME, "Аудио-движок недоступен.")
 
         threading.Thread(target=board_poll_loop, args=(self,), daemon=True, name="board-poll").start()
         try:
@@ -3698,6 +3812,11 @@ class VoicePlayerApp:
         self.root.bind("<F2>", lambda e: self._toggle_edit_text())
         self.root.bind("<Control-n>", lambda e: (self.tts_input.delete("1.0", "end"), self.tts_input.configure(height=3), self.tts_input.focus_set()) if hasattr(self, "tts_input") else None)
         self.root.bind("<Control-Shift-F>", lambda e: self.ent_search.focus_set() if hasattr(self, "ent_search") else None)
+        self.root.bind("<Control-Shift-T>", lambda e: self._toggle_theme_quick())
+        self.root.bind("<Control-Shift-M>", lambda e: self._toggle_mini_player())
+        self.root.bind("<Control-Shift-V>", lambda e: self._preview_voice())
+        self.root.bind("<Control-Shift-D>", lambda e: self._diagnostics())
+        self.root.bind("<Control-Shift-K>", lambda e: self._copy_diagnostics())
 
         self._update_filter_pills()
         self._update_rate_pills()
@@ -4674,7 +4793,23 @@ class VoicePlayerApp:
     def _open_settings(self, select_tab: str = ""):
         c = self.colors
         win = tk.Toplevel(self.root); win.title(vp_i18n.t("settings"))
-        win.transient(self.root); win.configure(bg=c["bg"]); self._center_over_root(win, 640, 470)
+
+        tab_titles = [
+            vp_i18n.t("tab_playback"),
+            vp_i18n.t("tab_recognition"),
+            vp_i18n.t("tab_appearance"),
+            vp_i18n.t("tab_shortcuts"),
+            vp_i18n.t("tab_team"),
+            vp_i18n.t("tab_ai_tab"),
+            vp_i18n.t("tab_updates"),
+        ]
+        needed_w = sum(len(t) * 9 + 32 for t in tab_titles) + 60
+        win_w = max(780, min(1020, needed_w))
+        win_h = 530
+        win.transient(self.root); win.configure(bg=c["bg"]); self._center_over_root(win, win_w, win_h)
+        win.minsize(win_w, win_h)
+        win.resizable(True, True)
+
         style = ttk.Style()
         style.configure("TNotebook", background=c["bg"], borderwidth=0)
         style.configure("TNotebook.Tab", background=c["panel2"], foreground=c["ink"], padding=(12, 6))
@@ -4703,9 +4838,10 @@ class VoicePlayerApp:
         ttk.Label(t1, text=vp_i18n.t("opt_sleep_timer")).grid(row=5, column=0, sticky="w", pady=(10, 0))
         off_lbl = vp_i18n.t("off")
         m_lbl = vp_i18n.t("min_short")
-        if self.var_sleep.get() in ("выкл", "off", ""):
+        cur_slp = self.var_sleep.get()
+        if cur_slp in ("выкл", "off", "desactivado", "关闭", "बंद", "オフ", "Aus", "désactivé", ""):
             self.var_sleep.set(off_lbl)
-        slp_opts = [off_lbl, f"15 {m_lbl}", f"30 {m_lbl}", f"45 {m_lbl}", f"60 {m_lbl}"]
+        slp_opts = [off_lbl, f"15 {m_lbl}", f"30 {m_lbl}", f"45 {m_lbl}", f"60 {m_lbl}", f"90 {m_lbl}"]
         slp = ttk.Combobox(t1, textvariable=self.var_sleep, state="readonly", width=12, values=slp_opts)
         slp.grid(row=5, column=1, sticky="ew", pady=(10, 0)); slp.bind("<<ComboboxSelected>>", self._on_sleep_change)
         # тихие часы: не беспокоить + интервал «с … до …»
@@ -4757,7 +4893,6 @@ class VoicePlayerApp:
             vp_i18n.set_lang(code)
             self._save_prefs()
             self._retranslate_ui()
-            # Мгновенно переоткрываем окно настроек, чтобы все вкладки отобразились на выбранном языке
             try:
                 win.destroy()
             except Exception:
@@ -4767,9 +4902,6 @@ class VoicePlayerApp:
         btn_lang_ok = ttk.Button(t3, text="✓ " + vp_i18n.t("apply_lang"), style="Primary.TButton",
                                  command=_apply_lang_action)
         btn_lang_ok.grid(row=0, column=2, padx=(8, 0))
-
-        # Selection in combobox waits for button click
-        # (user requested no auto-apply until button pressed)
 
         ttk.Label(t3, text=vp_i18n.t("theme")).grid(row=2, column=0, sticky="w", pady=(8, 0))
         th_dark = vp_i18n.t("theme_dark")
@@ -4808,6 +4940,56 @@ class VoicePlayerApp:
         ttk.Label(t3, text=vp_i18n.t("font_hint"),
                   style="Dim.TLabel").grid(row=4, column=0, columnspan=2, sticky="w", pady=(8, 0))
 
+        # — Горячие клавиши —
+        t_shortcuts = tab(vp_i18n.t("tab_shortcuts"))
+        ttk.Label(t_shortcuts, text=vp_i18n.t("global_shortcuts_title"), font=("Segoe UI Semibold", 9)).grid(
+            row=0, column=0, columnspan=2, sticky="w", pady=(0, 6))
+
+        glob_box = ttk.Frame(t_shortcuts, style="Panel.TFrame")
+        glob_box.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(0, 10))
+        glob_box.columnconfigure(1, weight=1)
+
+        is_mac = sys.platform == "darwin"
+        global_key1 = "Cmd + Shift + S" if is_mac else "Ctrl + Alt + S"
+        global_key2 = "Cmd + Shift + P" if is_mac else "Ctrl + Alt + P"
+
+        tk.Label(glob_box, text=global_key1, font=("Segoe UI Semibold", 9), bg=c["panel2"], fg=c["signal"],
+                 padx=8, pady=3, relief="flat", bd=0).grid(row=0, column=0, padx=(0, 8), pady=2, sticky="w")
+        ttk.Label(glob_box, text=vp_i18n.t("speak_selection_hint")).grid(row=0, column=1, sticky="w")
+
+        tk.Label(glob_box, text=global_key2, font=("Segoe UI Semibold", 9), bg=c["panel2"], fg=c["signal"],
+                 padx=8, pady=3, relief="flat", bd=0).grid(row=1, column=0, padx=(0, 8), pady=2, sticky="w")
+        ttk.Label(glob_box, text=f"{vp_i18n.t('play')} / {vp_i18n.t('pause')} ({vp_i18n.t('mode')})").grid(row=1, column=1, sticky="w")
+
+        quick_keys = [
+            ("Space / K", f"{vp_i18n.t('play')} / {vp_i18n.t('pause')}"),
+            ("Ctrl + Enter", vp_i18n.t("speak_btn")),
+            ("→  /  ←", f"{vp_i18n.t('next')} / {vp_i18n.t('prev')}"),
+            ("Ctrl + → / ←", "±10s Seek"),
+            ("Ctrl + 1 / 2 / 3 / 4", "1.0× / 1.25× / 1.5× / 2.0× Speed"),
+            ("Ctrl + ,", vp_i18n.t("settings")),
+            ("Ctrl + M", vp_i18n.t("opt_dnd")),
+            ("Ctrl + T", vp_i18n.t("tools")),
+            ("Ctrl + L", vp_i18n.t("reset")),
+            ("Ctrl + D", vp_i18n.t("dictate")),
+            ("Ctrl + Shift + T", f"{vp_i18n.t('theme')} (Dark / Light)"),
+            ("Ctrl + Shift + M", vp_i18n.t("mini_player")),
+        ]
+        q_frame = ttk.Frame(t_shortcuts)
+        q_frame.grid(row=2, column=0, columnspan=2, sticky="nsew", pady=(0, 10))
+        q_frame.columnconfigure(0, minsize=140)
+        q_frame.columnconfigure(1, weight=1)
+
+        for ri, (combo, action_name) in enumerate(quick_keys):
+            r = ri // 2
+            col_offset = (ri % 2) * 2
+            tk.Label(q_frame, text=combo, font=("Segoe UI Semibold", 8), bg=c["panel2"], fg=c["signal"],
+                     padx=6, pady=2, relief="flat", bd=0).grid(row=r, column=col_offset, padx=(0, 6), pady=2, sticky="w")
+            ttk.Label(q_frame, text=action_name, font=("Segoe UI", 9)).grid(row=r, column=col_offset+1, padx=(0, 14), pady=2, sticky="w")
+
+        ttk.Button(t_shortcuts, text=vp_i18n.t("open_shortcuts_dialog"), style="Toggle.TButton",
+                   command=self._show_shortcuts_dialog).grid(row=3, column=0, columnspan=2, sticky="w", pady=(8, 0))
+
         # — Команда —
         t4 = tab(vp_i18n.t("tab_team"))
         ttk.Label(t4, text=vp_i18n.t("tg_chat_hint")).grid(row=0, column=0, sticky="w")
@@ -4829,6 +5011,8 @@ class VoicePlayerApp:
             nb.select(t5)
         elif select_tab in ("Оформление", "appearance", vp_i18n.t("tab_appearance")):
             nb.select(t3)
+        elif select_tab in ("Горячие клавиши", "shortcuts", "hotkeys", vp_i18n.t("tab_shortcuts")):
+            nb.select(t_shortcuts)
 
         ttk.Button(win, text=vp_i18n.t("close"), style="Primary.TButton",
                    command=lambda: (self._save_prefs(), win.destroy())).pack(pady=(0, 10))
@@ -7033,7 +7217,7 @@ class VoicePlayerApp:
         return vp_i18n.t("stats_spoken_for_you", time=t_str, count=items)
 
     def _maybe_show_support_reminder(self):
-        """Ненавязчивое окно в стиле WinRAR: не чаще раза в 7 дней после ощутимой пользы,
+        """Ненавязчивое окно в стиле ненавязчивой поддержки: не чаще раза в 7 дней после ощутимой пользы,
         только когда плеер молчит и пользователь не активировал Supporter-ключ."""
         if self._is_supporter():
             return
@@ -7049,7 +7233,7 @@ class VoicePlayerApp:
         self._open_support_dialog(is_reminder=True)
 
     def _open_support_dialog(self, is_reminder: bool = False):
-        """Окно «О проекте / Поддержать VoicePlayer» (модель WinRAR + Supporter-ключ)."""
+        """Окно «О проекте / Поддержать VoicePlayer» (модель Supporter + Supporter-ключ)."""
         win = getattr(self, "_support_win", None)
         if win is not None and win.winfo_exists():
             win.lift()
@@ -7497,7 +7681,7 @@ class VoicePlayerApp:
             self._sleep_after = None
         if not minutes:
             self._sleep_deadline = 0.0
-            try: self.var_sleep.set("выкл")
+            try: self.var_sleep.set(vp_i18n.t("off"))
             except Exception: pass
             self._set_status("таймер сна выключен", ok=True)
             return
@@ -7513,7 +7697,7 @@ class VoicePlayerApp:
         self.user_paused = True
         self.current_idx = -1
         self.var_autoplay.set(False)        # чтобы новые реплики не запустили звук, пока спим
-        try: self.var_sleep.set("выкл")
+        try: self.var_sleep.set(vp_i18n.t("off"))
         except Exception: pass
         try: self.btn_toggle.configure(text=self._g_play)
         except Exception: pass
@@ -7992,28 +8176,40 @@ class VoicePlayerApp:
 
 def _kill_zombie_on_port(port: int) -> None:
     """Если старый процесс завис при закрытии и держит порт 3737 (не отвечает на /api/show), прибиваем его."""
-    if not IS_WIN:
-        return
-    try:
-        out = subprocess.check_output(
-            ["netstat", "-ano", "-p", "TCP"],
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-            text=True, timeout=3, errors="ignore"
-        )
-        my_pid = os.getpid()
-        for line in out.splitlines():
-            if f"127.0.0.1:{port} " in line and "LISTENING" in line:
-                parts = line.split()
-                pid = int(parts[-1])
-                if pid > 0 and pid != my_pid:
-                    k32 = ctypes.windll.kernel32
-                    h = k32.OpenProcess(1, False, pid)  # PROCESS_TERMINATE = 1
-                    if h:
-                        k32.TerminateProcess(h, 0)
-                        k32.CloseHandle(h)
-                    time.sleep(0.25)
-    except Exception:
-        pass
+    if IS_WIN:
+        try:
+            out = subprocess.check_output(
+                ["netstat", "-ano", "-p", "TCP"],
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                text=True, timeout=3, errors="ignore"
+            )
+            my_pid = os.getpid()
+            for line in out.splitlines():
+                if f"127.0.0.1:{port} " in line and "LISTENING" in line:
+                    parts = line.split()
+                    pid = int(parts[-1])
+                    if pid > 0 and pid != my_pid:
+                        k32 = ctypes.windll.kernel32
+                        h = k32.OpenProcess(1, False, pid)  # PROCESS_TERMINATE = 1
+                        if h:
+                            k32.TerminateProcess(h, 0)
+                            k32.CloseHandle(h)
+                        time.sleep(0.25)
+        except Exception:
+            pass
+    else:
+        try:
+            out = subprocess.check_output(["lsof", "-ti", f"tcp:{port}"], text=True, timeout=3, errors="ignore")
+            my_pid = str(os.getpid())
+            for pid_str in out.split():
+                if pid_str != my_pid and pid_str.isdigit():
+                    try:
+                        os.kill(int(pid_str), 9)
+                    except Exception:
+                        pass
+            time.sleep(0.2)
+        except Exception:
+            pass
 
 
 _dead_ports: set[int] = set()

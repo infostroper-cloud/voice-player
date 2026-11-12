@@ -56,7 +56,7 @@ curl -fsSL https://raw.githubusercontent.com/infostroper-cloud/voice-player/main
 
 ---
 
-## 💚 Честная модель WinRAR и статус Supporter Pro
+## 💚 Честная модель Supporter и статус Supporter Pro
 
 VoicePlayer **полностью бесплатен** для каждого пользователя, без урезания функций и без назойливой рекламы.
 

@@ -54,7 +54,7 @@ curl -fsSL https://raw.githubusercontent.com/infostroper-cloud/voice-player/main
 
 ---
 
-## 💚 Modelo Justo Estilo WinRAR y Clave Supporter Pro
+## 💚 Modelo Justo Estilo Supporter y Clave Supporter Pro
 
 VoicePlayer es **100% gratuito** para todos los desarrolladores, sin límites de funciones ni publicidad molesta.
 

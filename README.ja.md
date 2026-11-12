@@ -55,7 +55,7 @@ curl -fsSL https://raw.githubusercontent.com/infostroper-cloud/voice-player/main
 
 ---
 
-## 💚 WinRARスタイルの公平なモデル & サポーター Pro
+## 💚 Supporterスタイルの公平なモデル & サポーター Pro
 
 VoicePlayer はすべての開発者に対して **完全無料** で提供されており、機能制限や不快な広告は一切ありません。
 

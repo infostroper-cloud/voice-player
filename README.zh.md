@@ -55,7 +55,7 @@ curl -fsSL https://raw.githubusercontent.com/infostroper-cloud/voice-player/main
 
 ---
 
-## 💚 经典的 WinRAR 友好共享模式与 Pro 赞助徽章
+## 💚 经典的 Supporter 友好共享模式与 Pro 赞助徽章
 
 VoicePlayer 对所有开发者 **完全免费**，没有任何功能阉割，也不包含烦人的弹窗广告。
 

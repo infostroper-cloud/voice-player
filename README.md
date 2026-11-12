@@ -62,7 +62,7 @@ curl -fsSL https://raw.githubusercontent.com/infostroper-cloud/voice-player/main
 
 ---
 
-## 💚 Fair WinRAR Distribution Model & Supporter Pro
+## 💚 Fair Supporter Distribution Model & Supporter Pro
 
 VoicePlayer is **100% free** for all users, without functional limits or annoying ads.
 
