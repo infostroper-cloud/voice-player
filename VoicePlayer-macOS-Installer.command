@@ -10,14 +10,28 @@ echo "  Apple Silicon (M1/M2/M3/M4) & Intel x86_64"
 echo "============================================================"
 echo ""
 
-# Find Python 3
+# Find best Python 3 on macOS
 PY_BIN=""
-if [ -x "/opt/homebrew/bin/python3" ]; then
-    PY_BIN="/opt/homebrew/bin/python3"
-elif [ -x "/usr/local/bin/python3" ]; then
-    PY_BIN="/usr/local/bin/python3"
-elif command -v python3 >/dev/null 2>&1; then
-    PY_BIN="python3"
+for candidate in \
+    "/opt/homebrew/bin/python3" \
+    "/usr/local/bin/python3" \
+    "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3" \
+    "/Library/Frameworks/Python.framework/Versions/3.11/bin/python3" \
+    "/Library/Frameworks/Python.framework/Versions/3.10/bin/python3" \
+    "$HOME/.pyenv/shims/python3" \
+    "$HOME/miniconda3/bin/python3" \
+    "$HOME/miniforge3/bin/python3"
+do
+    if [ -x "$candidate" ]; then
+        PY_BIN="$candidate"
+        break
+    fi
+done
+
+if [ -z "$PY_BIN" ]; then
+    if command -v python3 >/dev/null 2>&1; then
+        PY_BIN="python3"
+    fi
 fi
 
 if [ -z "$PY_BIN" ]; then

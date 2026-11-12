@@ -1,29 +1,29 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="ru">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Download VoicePlayer 1.2.0 — Windows, macOS, Linux</title>
-  <meta name="description" content="Download VoicePlayer 1.2.0 for Windows 10/11, macOS Apple Silicon & Intel, and Linux. Free local neural voice player for AI coding assistants." />
+  <title id="pageTitle">Скачать VoicePlayer 1.2.0 — macOS, Windows, Linux</title>
+  <meta id="pageMetaDesc" name="description" content="Скачать VoicePlayer 1.2.0 для macOS, Windows 10/11 и Linux. Бесплатный настольный голосовой плеер для AI-ассистентов разработки с локальной офлайн-озвучкой." />
   <link rel="icon" type="image/png" href="icon.png" />
   <style>
     :root {
-      --bg: #0b0d0c;
-      --card-bg: rgba(19, 23, 21, 0.75);
-      --card-border: #232c27;
+      --bg: #090b0a;
+      --card-bg: rgba(18, 22, 20, 0.78);
+      --card-border: #222b26;
       --card-hover-border: #00f0a8;
-      --ink: #f0f4f2;
-      --mute: #85928b;
+      --ink: #f2f6f4;
+      --mute: #8e9c94;
       --signal: #00f0a8;
-      --signal-hover: #00ffb3;
-      --signal-glow: rgba(0, 240, 168, 0.25);
-      --surface: #161b18;
-      --surface-2: #1e2521;
-      --radius: 16px;
+      --signal-hover: #00ffb5;
+      --signal-glow: rgba(0, 240, 168, 0.22);
+      --surface: #141a17;
+      --surface-2: #1b231f;
+      --radius: 18px;
     }
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
-      background: radial-gradient(circle at 50% -20%, #17382a 0%, var(--bg) 65%);
+      background: radial-gradient(ellipse at 50% -10%, #17382a 0%, var(--bg) 70%);
       color: var(--ink);
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
       line-height: 1.6;
@@ -31,12 +31,12 @@
       display: flex;
       flex-direction: column;
     }
-    .container { max-width: 1140px; margin: 0 auto; padding: 0 24px; width: 100%; }
+    .container { max-width: 1160px; margin: 0 auto; padding: 0 24px; width: 100%; }
 
     /* Header */
     header {
       border-bottom: 1px solid var(--card-border);
-      background: rgba(11, 13, 12, 0.85);
+      background: rgba(9, 11, 10, 0.88);
       backdrop-filter: blur(16px);
       position: sticky;
       top: 0;
@@ -75,32 +75,34 @@
       background: var(--surface);
       border: 1px solid var(--card-border);
       color: var(--ink);
-      padding: 6px 12px;
+      padding: 7px 12px;
       border-radius: 8px;
       font-size: 0.85rem;
       cursor: pointer;
       outline: none;
+      transition: border-color .15s;
     }
+    .lang-btn:hover { border-color: var(--signal); }
 
     /* Hero */
     .hero {
       text-align: center;
-      padding: 56px 0 28px;
+      padding: 52px 0 24px;
     }
     .hero h1 {
       font-size: clamp(2.2rem, 5vw, 3.2rem);
       font-weight: 800;
       letter-spacing: -0.03em;
-      margin-bottom: 14px;
-      background: linear-gradient(180deg, #ffffff 40%, #9cb0a5 100%);
+      margin-bottom: 12px;
+      background: linear-gradient(180deg, #ffffff 30%, #a4b8ad 100%);
       -webkit-background-clip: text;
       -webkit-text-fill-color: transparent;
     }
     .hero p {
       color: var(--mute);
-      font-size: 1.15rem;
-      max-width: 680px;
-      margin: 0 auto 24px;
+      font-size: 1.12rem;
+      max-width: 700px;
+      margin: 0 auto 22px;
     }
 
     /* Detected OS pill */
@@ -111,9 +113,9 @@
       background: rgba(0, 240, 168, 0.08);
       border: 1px solid rgba(0, 240, 168, 0.4);
       box-shadow: 0 0 24px rgba(0, 240, 168, 0.12);
-      padding: 8px 20px;
+      padding: 8px 22px;
       border-radius: 999px;
-      font-size: 0.95rem;
+      font-size: 0.94rem;
       color: var(--signal);
       font-weight: 600;
     }
@@ -134,7 +136,7 @@
     .tabs-bar {
       display: flex;
       justify-content: center;
-      gap: 8px;
+      gap: 10px;
       margin: 32px 0 20px;
       flex-wrap: wrap;
     }
@@ -142,22 +144,22 @@
       background: var(--surface);
       border: 1px solid var(--card-border);
       color: var(--mute);
-      padding: 8px 18px;
-      border-radius: 10px;
+      padding: 9px 20px;
+      border-radius: 12px;
       font-size: 0.92rem;
       font-weight: 600;
       cursor: pointer;
       display: flex;
       align-items: center;
-      gap: 8px;
+      gap: 9px;
       transition: all .2s;
     }
-    .tab-btn:hover { color: var(--ink); border-color: #38453e; }
+    .tab-btn:hover { color: var(--ink); border-color: #3b4b42; }
     .tab-btn.active {
       background: var(--surface-2);
       border-color: var(--signal);
       color: var(--signal);
-      box-shadow: 0 0 15px rgba(0, 240, 168, 0.1);
+      box-shadow: 0 0 18px rgba(0, 240, 168, 0.12);
     }
     .tab-btn svg { width: 18px; height: 18px; }
 
@@ -177,16 +179,16 @@
       flex-direction: column;
       position: relative;
       transition: all .25s ease;
-      backdrop-filter: blur(12px);
+      backdrop-filter: blur(14px);
     }
     .card:hover {
-      border-color: #3b4941;
-      transform: translateY(-2px);
+      border-color: #3f5045;
+      transform: translateY(-3px);
     }
     .card.primary-match {
       border-color: var(--signal);
-      box-shadow: 0 12px 40px rgba(0, 240, 168, 0.14);
-      background: linear-gradient(180deg, rgba(23, 35, 29, 0.85) 0%, var(--card-bg) 100%);
+      box-shadow: 0 14px 44px rgba(0, 240, 168, 0.16);
+      background: linear-gradient(180deg, rgba(23, 38, 30, 0.9) 0%, var(--card-bg) 100%);
     }
     .card-head {
       display: flex;
@@ -195,9 +197,9 @@
       margin-bottom: 20px;
     }
     .os-logo-wrap {
-      width: 52px;
-      height: 52px;
-      border-radius: 12px;
+      width: 54px;
+      height: 54px;
+      border-radius: 14px;
       background: var(--surface);
       border: 1px solid var(--card-border);
       display: flex;
@@ -210,16 +212,16 @@
       color: var(--signal);
     }
     .chip {
-      font-size: 0.72rem;
+      font-size: 0.73rem;
       font-weight: 700;
       text-transform: uppercase;
       letter-spacing: 0.05em;
-      padding: 4px 10px;
+      padding: 5px 12px;
       border-radius: 999px;
     }
     .chip-rec {
       background: var(--signal);
-      color: #0b0d0c;
+      color: #090b0a;
     }
     .chip-default {
       background: var(--surface-2);
@@ -227,9 +229,9 @@
       border: 1px solid var(--card-border);
     }
 
-    .card h2 { font-size: 1.5rem; font-weight: 700; margin-bottom: 6px; }
-    .card-meta { font-size: 0.85rem; color: var(--signal); font-weight: 600; margin-bottom: 12px; }
-    .card-desc { color: var(--mute); font-size: 0.92rem; line-height: 1.55; margin-bottom: 24px; flex: 1; }
+    .card h2 { font-size: 1.55rem; font-weight: 700; margin-bottom: 4px; }
+    .card-meta { font-size: 0.84rem; color: var(--signal); font-weight: 600; margin-bottom: 12px; }
+    .card-desc { color: var(--mute); font-size: 0.92rem; line-height: 1.58; margin-bottom: 24px; flex: 1; }
 
     /* Action Buttons */
     .btn {
@@ -238,7 +240,7 @@
       justify-content: center;
       gap: 10px;
       padding: 13px 22px;
-      border-radius: 10px;
+      border-radius: 11px;
       font-weight: 600;
       font-size: 0.95rem;
       cursor: pointer;
@@ -250,12 +252,12 @@
     }
     .btn-glow {
       background: var(--signal);
-      color: #0b0d0c;
+      color: #090b0a;
       box-shadow: 0 4px 20px var(--signal-glow);
     }
     .btn-glow:hover {
       background: var(--signal-hover);
-      box-shadow: 0 6px 26px rgba(0, 240, 168, 0.35);
+      box-shadow: 0 6px 28px rgba(0, 240, 168, 0.38);
       transform: translateY(-1px);
     }
     .btn-outline {
@@ -266,15 +268,15 @@
     }
     .btn-outline:hover {
       background: var(--surface-2);
-      border-color: #43544b;
+      border-color: #485c51;
     }
 
     /* Terminal Code Accordion */
     .term-box {
       margin-top: 16px;
-      background: #070908;
+      background: #060807;
       border: 1px solid var(--card-border);
-      border-radius: 10px;
+      border-radius: 11px;
       padding: 12px 14px;
     }
     .term-label {
@@ -299,8 +301,8 @@
       background: var(--surface);
       border: 1px solid var(--card-border);
       color: var(--ink);
-      padding: 5px 10px;
-      border-radius: 6px;
+      padding: 5px 11px;
+      border-radius: 7px;
       font-size: 0.76rem;
       cursor: pointer;
       white-space: nowrap;
@@ -308,11 +310,18 @@
     }
     .btn-copy:hover { border-color: var(--signal); color: var(--signal); }
 
+    .req-hint {
+      font-size: 0.78rem;
+      color: #718177;
+      margin-top: 12px;
+      text-align: center;
+    }
+
     /* Direct Mirrors & Support */
     .section-grid {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
-      gap: 20px;
+      gap: 22px;
       margin-top: 48px;
     }
     .box-card {
@@ -332,8 +341,8 @@
     .c-link {
       background: var(--surface);
       border: 1px solid var(--card-border);
-      padding: 12px 16px;
-      border-radius: 10px;
+      padding: 13px 16px;
+      border-radius: 11px;
       display: flex;
       align-items: center;
       gap: 14px;
@@ -369,8 +378,9 @@
         <span class="badge-v">v1.2.0</span>
       </a>
       <div class="nav-actions">
-        <a href="index.html" class="nav-link" id="navHome">Home</a>
+        <a href="index.html" class="nav-link" id="navHome">Главная</a>
         <a href="https://github.com/infostroper-cloud/voice-player" target="_blank" rel="noopener" class="nav-link">GitHub</a>
+        <a href="https://t.me/voiceplayer_ai" target="_blank" rel="noopener" class="nav-link">Telegram</a>
         <select id="langSelect" class="lang-btn" onchange="switchLang(this.value)">
           <option value="ru">Русский</option>
           <option value="en">English</option>
@@ -387,23 +397,25 @@
 
   <main class="container">
     <section class="hero">
-      <h1 id="heroTitle">Скачать VoicePlayer</h1>
-      <p id="heroSub">Бесплатный настольный голосовой плеер для AI-ассистентов разработки (Antigravity, Codex, Claude Code, Cursor). Локальная нейросетевая озвучка на вашем процессоре без подписок и телеметрии.</p>
+      <h1 id="heroTitle">Скачать VoicePlayer 1.2.0</h1>
+      <p id="heroSub">Бесплатный настольный голосовой плеер для AI-ассистентов разработки (Antigravity, Codex, Claude Code, Cursor). Локальная нейросетевая озвучка прямо на процессоре без подписок, ключей и отправки данных в облако.</p>
       <div class="detected-pill" id="osBanner">
         <span class="pulse-dot"></span>
-        <span id="osBannerText">Определение вашей операционной системы...</span>
+        <span id="osBannerText">Определение вашей системы...</span>
       </div>
 
       <!-- Quick Platform Filter Tabs -->
       <div class="tabs-bar">
-        <button class="tab-btn active" id="tab-all" onclick="filterOS('all')">Все платформы</button>
+        <button class="tab-btn active" id="tab-all" onclick="filterOS('all')">
+          <span>❖</span> <span id="tabLabelAll">Все системы</span>
+        </button>
         <button class="tab-btn" id="tab-mac" onclick="filterOS('mac')">
           <svg viewBox="0 0 170 170" fill="currentColor"><path d="M150.37 130.25c-2.45 5.66-5.35 10.87-8.71 15.66-4.58 6.53-8.33 11.05-11.22 13.56-4.48 4.12-9.28 6.23-14.42 6.35-3.69 0-8.14-1.05-13.32-3.18-5.19-2.12-9.97-3.17-14.34-3.17-4.58 0-9.49 1.05-14.75 3.17-5.26 2.13-9.5 3.24-12.74 3.35-4.35.13-9.16-1.9-14.42-6.08-3.7-3.03-7.61-7.78-11.73-14.25-5.74-9.03-10.22-19.53-13.43-31.5-3.21-11.97-4.82-23.27-4.82-33.91 0-14.82 3.65-27.24 10.96-37.26 7.3-10.02 16.59-15.17 27.87-15.45 4.35 0 9.29 1.15 14.82 3.46 5.53 2.31 9.3 3.51 11.31 3.6 2.01-.1 5.86-1.3 11.53-3.6 5.68-2.31 10.42-3.41 14.23-3.32 10.02.48 18.33 4.11 24.93 10.89 6.6 6.78 10.84 14.82 12.72 24.12-9.03 5.48-13.49 13.06-13.38 22.75.11 8.52 3.47 15.66 10.08 21.43 6.61 5.77 14.6 9.07 23.98 9.91-2.12 6.55-4.58 13.31-7.38 20.28zM119.22 33.15c-.21-4.79 1.4-9.56 4.82-14.3 3.42-4.74 7.9-8.48 13.43-11.22-.32 4.67-1.91 9.34-4.77 14.01-2.86 4.67-7.23 8.51-13.11 11.51-.12 0-.25 0-.37 0z"/></svg>
-          macOS
+          Apple macOS
         </button>
         <button class="tab-btn" id="tab-win" onclick="filterOS('win')">
           <svg viewBox="0 0 88 88" fill="currentColor"><path d="M0 12.402l35.687-4.86.016 34.423-35.67.203zm35.67 33.529l.028 34.453L0 75.528l.033-29.622zm4.326-39.027L87.914 0v41.527l-47.918.376zm47.918 38.625l-.014 41.597-47.886-6.734-.018-34.482z"/></svg>
-          Windows
+          Microsoft Windows
         </button>
         <button class="tab-btn" id="tab-linux" onclick="filterOS('linux')">
           <svg viewBox="0 0 340 340" fill="currentColor"><path d="M167.3 12.2c-23.7 1.4-44.5 18.5-47.7 41.8-1.5 11.2-.6 24.1 2.3 36.4-15.6 13.9-26.6 33.5-30.8 54.8-5.3 26.8-1.9 55.2 9.6 79.7-4.1 6.8-7.9 14.1-10.7 21.8-3.9 10.7-3.9 17.6-1.5 22.8 3.5 7.6 10.7 11.7 20.3 12.3 16.7 1 34.5-8.2 46.8-21.8 7.3 2.5 14.9 3.8 22.7 3.8 7.6 0 15.2-1.3 22.4-3.7 12.4 13.6 30.2 22.8 46.9 21.8 9.6-.6 16.8-4.7 20.3-12.3 2.4-5.2 2.4-12.1-1.5-22.8-2.8-7.7-6.6-15-10.7-21.8 11.5-24.5 14.9-52.9 9.6-79.7-4.2-21.3-15.2-40.9-30.8-54.8 2.9-12.3 3.8-25.2 2.3-36.4-3.2-23.3-24-40.4-47.7-41.8-2.5-.2-5-.3-7.5-.3z"/></svg>
@@ -422,16 +434,16 @@
           </div>
           <span class="chip chip-default" id="chip-mac">Apple Silicon & Intel</span>
         </div>
-        <h2>macOS</h2>
-        <div class="card-meta">macOS 11+ (Big Sur, Monterey, Ventura, Sonoma, Sequoia)</div>
+        <h2 id="title-mac">Apple macOS</h2>
+        <div class="card-meta" id="meta-mac">macOS 11+ (Big Sur, Monterey, Ventura, Sonoma, Sequoia)</div>
         <p class="card-desc" id="desc-mac">Оптимизировано для чипов Apple Silicon (M1/M2/M3/M4) и Intel x86_64. Нативная интеграция с папкой Программы, поддержка тёмной темы и горячих клавиш.</p>
 
-        <!-- Direct Click-to-Install on Mac -->
+        <!-- Direct 1-Click Double-Clickable Installer on Mac -->
         <a href="https://raw.githubusercontent.com/infostroper-cloud/voice-player/main/VoicePlayer-macOS-Installer.command" download="VoicePlayer-macOS-Installer.command" class="btn btn-glow" id="btn-mac-run">
           ⚡ Скачать установщик (.command в 1 клик)
         </a>
         <a href="https://github.com/infostroper-cloud/voice-player/releases/download/voice-player-v1.2.0/VoicePlayer-1.2.0-macos-linux.tar.gz" class="btn btn-outline" id="btn-mac-tar">
-          📦 Автономный архив (.tar.gz, 216 КБ)
+          📦 Автономный архив (.tar.gz, 217 КБ)
         </a>
 
         <!-- Terminal Command -->
@@ -442,6 +454,7 @@
             <button class="btn-copy" onclick="copySnippet('cmd-mac', this)">Copy</button>
           </div>
         </div>
+        <div class="req-hint" id="hint-mac">Требуется Python 3.10+ (brew install python python-tk или python.org)</div>
       </div>
 
       <!-- Windows Card -->
@@ -452,23 +465,24 @@
           </div>
           <span class="chip chip-default" id="chip-win">Windows 10 / 11</span>
         </div>
-        <h2>Windows</h2>
-        <div class="card-meta">Windows 10 / 11 (64-бит)</div>
+        <h2 id="title-win">Microsoft Windows</h2>
+        <div class="card-meta" id="meta-win">Windows 10 / 11 (64-бит)</div>
         <p class="card-desc" id="desc-win">Полноценный графический установщик с автоматическим созданием ярлыков на Рабочем столе, закреплением в панели задач и фоновым обновлением.</p>
 
         <a href="https://github.com/infostroper-cloud/voice-player/releases/download/voice-player-v1.2.0/VoicePlayer-Setup-1.2.0.exe" class="btn btn-glow" id="btn-win-exe">
           ⬇ Скачать установщик (.exe, 11.7 МБ)
         </a>
         <a href="https://github.com/infostroper-cloud/voice-player/releases/download/voice-player-v1.2.0/voice-player-1.2.0.zip" class="btn btn-outline" id="btn-win-zip">
-          📦 Портативный архив (.zip, 200 КБ)
+          📦 Портативный архив (.zip, 206 КБ)
         </a>
 
         <div class="term-box">
-          <span class="term-label">Поддержка DWM & Taskbar:</span>
+          <span class="term-label" id="lbl-win-feat">Особенности для Windows:</span>
           <div class="term-row">
-            <code>Win+Alt+S / Piper Local CPU / Dark Mint Theme</code>
+            <code>Win+Alt+S / Taskbar Pin / Local Piper CPU</code>
           </div>
         </div>
+        <div class="req-hint" id="hint-win">Включает встроенный Python и все нейросетевые зависимости</div>
       </div>
 
       <!-- Linux Card -->
@@ -479,15 +493,15 @@
           </div>
           <span class="chip chip-default" id="chip-linux">Любые дистрибутивы</span>
         </div>
-        <h2>Linux</h2>
-        <div class="card-meta">Ubuntu, Debian, Fedora, Arch & Manjaro</div>
-        <p class="card-desc" id="desc-linux">Устанавливается в ~/.voice-player с автоматической интеграцией в меню приложений (.desktop) для GNOME, KDE, XFCE и системной командой в PATH.</p>
+        <h2 id="title-linux">Linux</h2>
+        <div class="card-meta" id="meta-linux">Ubuntu, Debian, Fedora, Arch & Manjaro</div>
+        <p class="card-desc" id="desc-linux">Устанавливается в ~/.voice-player с автоматической интеграцией в меню приложений (.desktop) для GNOME, KDE, XFCE и системной командой voiceplayer в PATH.</p>
 
         <a href="https://raw.githubusercontent.com/infostroper-cloud/voice-player/main/install.sh" download="install.sh" class="btn btn-glow" id="btn-linux-sh">
           ⚡ Скачать скрипт установки (install.sh)
         </a>
         <a href="https://github.com/infostroper-cloud/voice-player/releases/download/voice-player-v1.2.0/VoicePlayer-1.2.0-macos-linux.tar.gz" class="btn btn-outline" id="btn-linux-tar">
-          📦 Автономный архив (.tar.gz, 216 КБ)
+          📦 Автономный архив (.tar.gz, 217 КБ)
         </a>
 
         <div class="term-box">
@@ -497,6 +511,7 @@
             <button class="btn-copy" onclick="copySnippet('cmd-linux', this)">Copy</button>
           </div>
         </div>
+        <div class="req-hint" id="hint-linux">Требуется Python 3.10+ и пакет python3-tk</div>
       </div>
 
     </div>
@@ -504,21 +519,21 @@
     <!-- Additional Channels & Global Support -->
     <div class="section-grid">
       <div class="box-card">
-        <h3 id="secDirectTitle">Прямые загрузки и зеркала</h3>
+        <h3 id="secDirectTitle">Прямые загрузки и каналы</h3>
         <p id="secDirectDesc">Все установочные файлы продублированы в Telegram и GitHub Releases для прямого доступа без ограничений:</p>
         <div class="channel-links">
           <a href="https://t.me/voiceplayer_ai" target="_blank" rel="noopener" class="c-link">
             <span class="c-icon">✈️</span>
             <div class="c-info">
-              <strong>Telegram-канал @voiceplayer_ai</strong>
-              <span>Файлы Setup.exe, .tar.gz, обсуждения и поддержка</span>
+              <strong id="tgTitle">Telegram-канал @voiceplayer_ai</strong>
+              <span id="tgSub">Файлы Setup.exe, .tar.gz, обсуждения и поддержка</span>
             </div>
           </a>
           <a href="https://github.com/infostroper-cloud/voice-player/releases" target="_blank" rel="noopener" class="c-link">
             <span class="c-icon">🐙</span>
             <div class="c-info">
               <strong>GitHub Releases</strong>
-              <span>Исходный код, контрольные суммы SHA-256 и релизные ноты</span>
+              <span id="ghSub">Исходный код, контрольные суммы SHA-256 и релизные ноты</span>
             </div>
           </a>
         </div>
@@ -532,21 +547,21 @@
             <span class="c-icon">☕</span>
             <div class="c-info">
               <strong>Ko-fi (Международный)</strong>
-              <span>PayPal, Visa, Mastercard, Apple Pay, Google Pay без комиссии</span>
+              <span id="kofiSub">PayPal, Visa, Mastercard, Apple Pay, Google Pay без комиссии</span>
             </div>
           </a>
           <a href="https://voiceplayer.lemonsqueezy.com" target="_blank" rel="noopener" class="c-link">
             <span class="c-icon">🍋</span>
             <div class="c-info">
               <strong>LemonSqueezy</strong>
-              <span>Официальная лицензия Supporter ★ Pro для иностранных карт</span>
+              <span id="lemonSub">Официальная лицензия Supporter ★ Pro для иностранных карт</span>
             </div>
           </a>
           <a href="https://boosty.to/voiceplayer" target="_blank" rel="noopener" class="c-link">
             <span class="c-icon">🚀</span>
             <div class="c-info">
               <strong>Boosty (РФ и СНГ)</strong>
-              <span>Оплата картами МИР, СБП и ЮMoney для разработчиков из СНГ</span>
+              <span id="boostySub">Оплата картами МИР, СБП и ЮMoney для разработчиков из СНГ</span>
             </div>
           </a>
         </div>
@@ -555,7 +570,7 @@
   </main>
 
   <footer>
-    <div class="container">
+    <div class="container" id="footerText">
       VoicePlayer 1.2.0 • Лицензия MIT • Офлайн нейросетевая речь для AI-разработки
     </div>
   </footer>
@@ -566,7 +581,7 @@
       const text = document.getElementById(id).innerText;
       navigator.clipboard.writeText(text).then(() => {
         const orig = btn.innerText;
-        btn.innerText = "✓ Скопировано";
+        btn.innerText = "✓ OK";
         btn.style.color = "var(--signal)";
         btn.style.borderColor = "var(--signal)";
         setTimeout(() => {
@@ -603,11 +618,11 @@
       const ua = navigator.userAgent || "";
       const platform = navigator.userAgentData?.platform || navigator.platform || "";
       let current = "win";
-      let name = "Windows 10 / 11";
+      let name = "Microsoft Windows 10 / 11";
 
       if (/Mac|iPhone|iPad|iPod/i.test(platform) || /Macintosh|Mac OS X/i.test(ua)) {
         current = "mac";
-        name = "macOS (Apple Silicon & Intel)";
+        name = "Apple macOS (Apple Silicon & Intel)";
       } else if (/Linux/i.test(platform) || /Linux|X11/i.test(ua)) {
         current = "linux";
         name = "Linux (Ubuntu / Debian / Fedora / Arch)";
@@ -627,7 +642,17 @@
       const chipLinux = document.getElementById("chip-linux");
 
       const curLang = document.getElementById("langSelect").value;
-      const recText = (curLang === "ru") ? "Рекомендуется для вас" : "Recommended for you";
+      const recMap = {
+        ru: "Рекомендуется для вас",
+        en: "Recommended for you",
+        es: "Recomendado para ti",
+        zh: "为您推荐",
+        ja: "あなたへのおすすめ",
+        de: "Für Sie empfohlen",
+        fr: "Recommandé pour vous",
+        hi: "आपके लिए अनुशंसित"
+      };
+      const recText = recMap[curLang] || recMap["en"];
 
       if (current === "mac") {
         mac.classList.add("primary-match");
@@ -644,113 +669,282 @@
       }
 
       const bannerText = document.getElementById("osBannerText");
-      const prefix = (curLang === "ru") ? "Ваша система определена: " : "Detected for your system: ";
+      const prefixMap = {
+        ru: "Ваша система определена: ",
+        en: "Detected your system: ",
+        es: "Sistema detectado: ",
+        zh: "已检测到您的系统: ",
+        ja: "検出されたシステム: ",
+        de: "Erkanntes System: ",
+        fr: "Système détecté: ",
+        hi: "आपके सिस्टम का पता चला: "
+      };
+      const prefix = prefixMap[curLang] || prefixMap["en"];
       bannerText.innerText = prefix + name;
     }
 
-    // Full Multilingual Support
+    // Full Multilingual Support (8 languages)
     const langDict = {
       ru: {
+        pageTitle: "Скачать VoicePlayer 1.2.0 — macOS, Windows, Linux",
         navHome: "Главная",
-        heroTitle: "Скачать VoicePlayer",
-        heroSub: "Бесплатный настольный голосовой плеер для AI-ассистентов разработки (Antigravity, Codex, Claude Code, Cursor). Локальная нейросетевая озвучка на вашем процессоре без подписок и телеметрии.",
-        tabAll: "Все платформы",
+        heroTitle: "Скачать VoicePlayer 1.2.0",
+        heroSub: "Бесплатный настольный голосовой плеер для AI-ассистентов разработки (Antigravity, Codex, Claude Code, Cursor). Локальная нейросетевая озвучка прямо на процессоре без подписок, ключей и отправки данных в облако.",
+        tabLabelAll: "Все системы",
         chipMac: "Apple Silicon & Intel",
         chipWin: "Windows 10 / 11",
         chipLinux: "Любые дистрибутивы",
+        titleMac: "Apple macOS",
+        metaMac: "macOS 11+ (Big Sur, Monterey, Ventura, Sonoma, Sequoia)",
         descMac: "Оптимизировано для чипов Apple Silicon (M1/M2/M3/M4) и Intel x86_64. Нативная интеграция с папкой Программы, поддержка тёмной темы и горячих клавиш.",
         btnMacRun: "⚡ Скачать установщик (.command в 1 клик)",
-        btnMacTar: "📦 Автономный архив (.tar.gz, 216 КБ)",
+        btnMacTar: "📦 Автономный архив (.tar.gz, 217 КБ)",
         lblMacCmd: "Или установка через Терминал:",
+        hintMac: "Требуется Python 3.10+ (brew install python python-tk или python.org)",
+        titleWin: "Microsoft Windows",
+        metaWin: "Windows 10 / 11 (64-бит)",
         descWin: "Полноценный графический установщик с автоматическим созданием ярлыков на Рабочем столе, закреплением в панели задач и фоновым обновлением.",
         btnWinExe: "⬇ Скачать установщик (.exe, 11.7 МБ)",
-        btnWinZip: "📦 Портативный архив (.zip, 200 КБ)",
-        descLinux: "Устанавливается в ~/.voice-player с автоматической интеграцией в меню приложений (.desktop) для GNOME, KDE, XFCE и системной командой в PATH.",
+        btnWinZip: "📦 Портативный архив (.zip, 206 КБ)",
+        lblWinFeat: "Особенности для Windows:",
+        hintWin: "Включает встроенный Python и все нейросетевые зависимости",
+        titleLinux: "Linux",
+        metaLinux: "Ubuntu, Debian, Fedora, Arch & Manjaro",
+        descLinux: "Устанавливается в ~/.voice-player с автоматической интеграцией в меню приложений (.desktop) для GNOME, KDE, XFCE и системной командой voiceplayer в PATH.",
         btnLinuxSh: "⚡ Скачать скрипт установки (install.sh)",
-        btnLinuxTar: "📦 Автономный архив (.tar.gz, 216 КБ)",
+        btnLinuxTar: "📦 Автономный архив (.tar.gz, 217 КБ)",
         lblLinuxCmd: "Или установка в 1 команду:",
-        secDirectTitle: "Прямые загрузки и зеркала",
+        hintLinux: "Требуется Python 3.10+ и пакет python3-tk",
+        secDirectTitle: "Прямые загрузки и каналы",
         secDirectDesc: "Все установочные файлы продублированы в Telegram и GitHub Releases для прямого доступа без ограничений:",
         secPayTitle: "Поддержка проекта (Донаты)",
-        secPayDesc: "VoicePlayer полностью открыт и бесплатен. Вы можете поддержать разработку из любой точки мира:"
+        secPayDesc: "VoicePlayer полностью открыт и бесплатен. Вы можете поддержать разработку из любой точки мира:",
+        tgTitle: "Telegram-канал @voiceplayer_ai",
+        tgSub: "Файлы Setup.exe, .tar.gz, обсуждения и поддержка",
+        ghSub: "Исходный код, контрольные суммы SHA-256 и релизные ноты",
+        kofiSub: "PayPal, Visa, Mastercard, Apple Pay, Google Pay без комиссии",
+        lemonSub: "Официальная лицензия Supporter ★ Pro для иностранных карт",
+        boostySub: "Оплата картами МИР, СБП и ЮMoney для разработчиков из СНГ",
+        footerText: "VoicePlayer 1.2.0 • Лицензия MIT • Офлайн нейросетевая речь для AI-разработки"
       },
       en: {
+        pageTitle: "Download VoicePlayer 1.2.0 — macOS, Windows, Linux",
         navHome: "Home",
-        heroTitle: "Download VoicePlayer",
-        heroSub: "Free desktop voice companion for AI coding assistants (Antigravity, Codex, Claude Code, Cursor). High-speed local neural speech running on your CPU offline.",
-        tabAll: "All Platforms",
+        heroTitle: "Download VoicePlayer 1.2.0",
+        heroSub: "Free desktop voice companion for AI coding assistants (Antigravity, Codex, Claude Code, Cursor). High-speed local neural speech running on your CPU offline without subscriptions or cloud telemetry.",
+        tabLabelAll: "All Platforms",
         chipMac: "Apple Silicon & Intel",
         chipWin: "Windows 10 / 11",
         chipLinux: "All Distributions",
+        titleMac: "Apple macOS",
+        metaMac: "macOS 11+ (Big Sur, Monterey, Ventura, Sonoma, Sequoia)",
         descMac: "Optimized for Apple Silicon (M1/M2/M3/M4) and Intel x86_64. Native Applications integration, dark mode, and hotkeys.",
         btnMacRun: "⚡ Download Installer (.command 1-Click)",
-        btnMacTar: "📦 Standalone Archive (.tar.gz, 216 KB)",
+        btnMacTar: "📦 Standalone Archive (.tar.gz, 217 KB)",
         lblMacCmd: "Or install via Terminal:",
+        hintMac: "Requires Python 3.10+ (brew install python python-tk or python.org)",
+        titleWin: "Microsoft Windows",
+        metaWin: "Windows 10 / 11 (64-bit)",
         descWin: "Full-featured GUI installer with desktop shortcuts, taskbar pinning, and background self-healing auto-updates.",
         btnWinExe: "⬇ Download Installer (.exe, 11.7 MB)",
-        btnWinZip: "📦 Portable Archive (.zip, 200 KB)",
+        btnWinZip: "📦 Portable Archive (.zip, 206 KB)",
+        lblWinFeat: "Windows Features:",
+        hintWin: "Includes embedded Python and all neural voice dependencies",
+        titleLinux: "Linux",
+        metaLinux: "Ubuntu, Debian, Fedora, Arch & Manjaro",
         descLinux: "Installs cleanly into ~/.voice-player with .desktop application launcher for GNOME/KDE and CLI command in PATH.",
         btnLinuxSh: "⚡ Download Shell Script (install.sh)",
-        btnLinuxTar: "📦 Standalone Archive (.tar.gz, 216 KB)",
+        btnLinuxTar: "📦 Standalone Archive (.tar.gz, 217 KB)",
         lblLinuxCmd: "Or 1-line terminal install:",
+        hintLinux: "Requires Python 3.10+ and python3-tk package",
         secDirectTitle: "Direct Mirrors & Downloads",
         secDirectDesc: "Installer binaries are mirrored directly on Telegram and GitHub Releases:",
         secPayTitle: "Support the Project",
-        secPayDesc: "VoicePlayer is free and open-source. You can support continued development globally:"
+        secPayDesc: "VoicePlayer is free and open-source. You can support continued development globally:",
+        tgTitle: "Telegram Channel @voiceplayer_ai",
+        tgSub: "Setup.exe, .tar.gz binaries, discussions and help",
+        ghSub: "Source code, SHA-256 checksums, and release notes",
+        kofiSub: "PayPal, Visa, Mastercard, Apple Pay, Google Pay without fees",
+        lemonSub: "Official Supporter ★ Pro license for international cards",
+        boostySub: "Support with MIR cards, SBP, and CIS payment methods",
+        footerText: "VoicePlayer 1.2.0 • MIT License • Offline neural speech for AI engineering"
       },
       es: {
+        pageTitle: "Descargar VoicePlayer 1.2.0 — macOS, Windows, Linux",
         navHome: "Inicio",
-        heroTitle: "Descargar VoicePlayer",
-        heroSub: "Reproductor de voz para asistentes de IA. Síntesis neuronal local en tu CPU sin suscripciones ni telemetría.",
-        tabAll: "Todas las plataformas",
+        heroTitle: "Descargar VoicePlayer 1.2.0",
+        heroSub: "Reproductor de voz de escritorio para asistentes de IA de desarrollo. Síntesis neuronal local en tu procesador sin suscripciones ni telemetría.",
+        tabLabelAll: "Todas las plataformas",
         chipMac: "Apple Silicon e Intel",
         chipWin: "Windows 10 / 11",
         chipLinux: "Todas las distribuciones",
-        descMac: "Optimizado para Apple Silicon (M1-M4) e Intel. Integración nativa en Aplicaciones y modo oscuro.",
+        titleMac: "Apple macOS",
+        metaMac: "macOS 11+ (Big Sur, Monterey, Ventura, Sonoma, Sequoia)",
+        descMac: "Optimizado para chips Apple Silicon (M1-M4) e Intel x86_64. Integración nativa en Aplicaciones y modo oscuro.",
         btnMacRun: "⚡ Descargar instalador (.command en 1 clic)",
-        btnMacTar: "📦 Paquete independiente (.tar.gz, 216 KB)",
+        btnMacTar: "📦 Paquete independiente (.tar.gz, 217 KB)",
         lblMacCmd: "O instalar por Terminal:",
+        hintMac: "Requiere Python 3.10+ (brew install python python-tk o python.org)",
+        titleWin: "Microsoft Windows",
+        metaWin: "Windows 10 / 11 (64 bits)",
         descWin: "Instalador con creación de accesos directos, anclaje a barra de tareas y autoactualización.",
         btnWinExe: "⬇ Descargar instalador (.exe, 11.7 MB)",
-        btnWinZip: "📦 Archivo portable (.zip, 200 KB)",
+        btnWinZip: "📦 Archivo portable (.zip, 206 KB)",
+        lblWinFeat: "Características de Windows:",
+        hintWin: "Incluye Python integrado y dependencias neuronales",
+        titleLinux: "Linux",
+        metaLinux: "Ubuntu, Debian, Fedora, Arch y Manjaro",
         descLinux: "Se instala en ~/.voice-player con lanzador .desktop para GNOME y KDE.",
         btnLinuxSh: "⚡ Descargar script (install.sh)",
-        btnLinuxTar: "📦 Paquete independiente (.tar.gz, 216 KB)",
+        btnLinuxTar: "📦 Paquete independiente (.tar.gz, 217 KB)",
         lblLinuxCmd: "O instalar en 1 comando:",
+        hintLinux: "Requiere Python 3.10+ y python3-tk",
         secDirectTitle: "Descargas directas y canales",
         secDirectDesc: "Archivos disponibles en Telegram y GitHub Releases:",
         secPayTitle: "Apoyar el proyecto",
-        secPayDesc: "VoicePlayer es de código abierto. Puedes apoyar el desarrollo desde cualquier país:"
+        secPayDesc: "VoicePlayer es de código abierto. Puedes apoyar el desarrollo desde cualquier país:",
+        tgTitle: "Canal de Telegram @voiceplayer_ai",
+        tgSub: "Archivos Setup.exe, .tar.gz y soporte",
+        ghSub: "Código fuente, SHA-256 y notas de la versión",
+        kofiSub: "PayPal, tarjetas internacionales y Apple Pay",
+        lemonSub: "Licencia oficial Supporter ★ Pro",
+        boostySub: "Pago con tarjetas locales de la CEI",
+        footerText: "VoicePlayer 1.2.0 • Licencia MIT • Síntesis de voz offline para desarrolladores"
+      },
+      ja: {
+        pageTitle: "VoicePlayer 1.2.0 をダウンロード — macOS, Windows, Linux",
+        navHome: "ホーム",
+        heroTitle: "VoicePlayer 1.2.0 をダウンロード",
+        heroSub: "AIコーディングアシスタントのための無料デスクトップ音声プレイヤー。クラウド送信なし、CPUローカルで高速ニューラル音声合成。",
+        tabLabelAll: "すべてのOS",
+        chipMac: "Apple Silicon & Intel",
+        chipWin: "Windows 10 / 11",
+        chipLinux: "全ディストリビューション",
+        titleMac: "Apple macOS",
+        metaMac: "macOS 11+ (Big Sur, Monterey, Ventura, Sonoma, Sequoia)",
+        descMac: "Apple Silicon (M1〜M4) および Intel に最適化。アプリケーションフォルダ連携、ダークテーマ、ショートカット対応。",
+        btnMacRun: "⚡ インストーラーをダウンロード (.command 1クリック)",
+        btnMacTar: "📦 スタンドアロンアーカイブ (.tar.gz, 217 KB)",
+        lblMacCmd: "またはターミナルからインストール:",
+        hintMac: "Python 3.10+ が必要です (brew install python python-tk または python.org)",
+        titleWin: "Microsoft Windows",
+        metaWin: "Windows 10 / 11 (64ビット)",
+        descWin: "デスクトップショートカット作成、タスクバーピン留め、自動バックグラウンド更新を備えたGUIインストーラー。",
+        btnWinExe: "⬇ インストーラーをダウンロード (.exe, 11.7 MB)",
+        btnWinZip: "📦 ポータブル版 (.zip, 206 KB)",
+        lblWinFeat: "Windows機能:",
+        hintWin: "組み込みPythonと全ニューラル音声依存関係を同梱",
+        titleLinux: "Linux",
+        metaLinux: "Ubuntu, Debian, Fedora, Arch & Manjaro",
+        descLinux: "~/.voice-player にインストールされ、GNOME/KDE用 .desktop ランチャーと PATH コマンドを自動設定。",
+        btnLinuxSh: "⚡ インストールスクリプト (install.sh)",
+        btnLinuxTar: "📦 スタンドアロンアーカイブ (.tar.gz, 217 KB)",
+        lblLinuxCmd: "または1行コマンドでインストール:",
+        hintLinux: "Python 3.10+ および python3-tk パッケージが必要",
+        secDirectTitle: "直接ダウンロードと公式チャンネル",
+        secDirectDesc: "インストーラーは Telegram および GitHub Releases でも直接配布されています:",
+        secPayTitle: "プロジェクト支援 (寄付)",
+        secPayDesc: "VoicePlayer はオープンソースで無料です。世界中から開発を支援いただけます:",
+        tgTitle: "Telegram チャンネル @voiceplayer_ai",
+        tgSub: "Setup.exe, .tar.gz ファイルおよびサポート",
+        ghSub: "ソースコード、SHA-256 チェックサム、リリースノート",
+        kofiSub: "PayPal、クレジットカード、Apple Pay 対応",
+        lemonSub: "海外カード用 Supporter ★ Pro 公式ライセンス",
+        boostySub: "ロシアおよびCIS諸国向け決済対応",
+        footerText: "VoicePlayer 1.2.0 • MITライセンス • AI開発のためのオフラインニューラル音声合成"
+      },
+      zh: {
+        pageTitle: "下载 VoicePlayer 1.2.0 — macOS, Windows, Linux",
+        navHome: "首页",
+        heroTitle: "下载 VoicePlayer 1.2.0",
+        heroSub: "专为 AI 编程助手设计的免费桌面语音播放器。在您的处理器上完全离线运行本地神经网络语音合成，无需订阅与隐私上传。",
+        tabLabelAll: "所有平台",
+        chipMac: "Apple Silicon & Intel",
+        chipWin: "Windows 10 / 11",
+        chipLinux: "所有发行版",
+        titleMac: "Apple macOS",
+        metaMac: "macOS 11+ (Big Sur, Monterey, Ventura, Sonoma, Sequoia)",
+        descMac: "针对 Apple Silicon (M1-M4) 和 Intel 深度优化。原生应用程序目录集成，支持深色模式与快捷键。",
+        btnMacRun: "⚡ 下载安装程序 (.command 一键安装)",
+        btnMacTar: "📦 独立离线包 (.tar.gz, 217 KB)",
+        lblMacCmd: "或通过终端命令安装:",
+        hintMac: "需要 Python 3.10+ (brew install python python-tk 或 python.org)",
+        titleWin: "Microsoft Windows",
+        metaWin: "Windows 10 / 11 (64位)",
+        descWin: "全功能图形化安装包，自动创建桌面图标、任务栏锁定与后台自我修复更新。",
+        btnWinExe: "⬇ 下载安装包 (.exe, 11.7 MB)",
+        btnWinZip: "📦 便携版压缩包 (.zip, 206 KB)",
+        lblWinFeat: "Windows 特性:",
+        hintWin: "内置 Python 环境及所有神经网络语音模型组件",
+        titleLinux: "Linux",
+        metaLinux: "Ubuntu, Debian, Fedora, Arch & Manjaro",
+        descLinux: "一键安装至 ~/.voice-player，自动配置 GNOME/KDE 的 .desktop 启动图标与终端 PATH 命令。",
+        btnLinuxSh: "⚡ 下载安装脚本 (install.sh)",
+        btnLinuxTar: "📦 独立离线包 (.tar.gz, 217 KB)",
+        lblLinuxCmd: "或通过单行命令安装:",
+        hintLinux: "需要 Python 3.10+ 及 python3-tk 组件包",
+        secDirectTitle: "直链镜像与频道",
+        secDirectDesc: "所有安装文件均同步发布在 Telegram 和 GitHub Releases:",
+        secPayTitle: "支持本项目",
+        secPayDesc: "VoicePlayer 完全开源免费。欢迎全球开发者赞助支持项目迭代:",
+        tgTitle: "Telegram 频道 @voiceplayer_ai",
+        tgSub: "Setup.exe, .tar.gz 安装包及讨论支持",
+        ghSub: "源代码、SHA-256 校验值与更新说明",
+        kofiSub: "支持 PayPal、国际信用卡及 Apple Pay",
+        lemonSub: "海外卡 Supporter ★ Pro 官方授权激活码",
+        boostySub: "俄罗斯及独联体本地银行卡支付方式",
+        footerText: "VoicePlayer 1.2.0 • MIT 开源协议 • 面向 AI 研发的离线神经网络语音"
       }
     };
 
     function switchLang(lang) {
       const t = langDict[lang] || langDict["en"];
+      document.getElementById("pageTitle").innerText = t.pageTitle;
       document.getElementById("navHome").innerText = t.navHome;
       document.getElementById("heroTitle").innerText = t.heroTitle;
       document.getElementById("heroSub").innerText = t.heroSub;
-      document.getElementById("tab-all").innerText = t.tabAll;
+      document.getElementById("tabLabelAll").innerText = t.tabLabelAll;
+      document.getElementById("chip-mac").innerText = t.chipMac;
+      document.getElementById("chip-win").innerText = t.chipWin;
+      document.getElementById("chip-linux").innerText = t.chipLinux;
+      document.getElementById("title-mac").innerText = t.titleMac;
+      document.getElementById("meta-mac").innerText = t.metaMac;
       document.getElementById("desc-mac").innerText = t.descMac;
       document.getElementById("btn-mac-run").innerText = t.btnMacRun;
       document.getElementById("btn-mac-tar").innerText = t.btnMacTar;
       document.getElementById("lbl-mac-cmd").innerText = t.lblMacCmd;
+      document.getElementById("hint-mac").innerText = t.hintMac;
+      document.getElementById("title-win").innerText = t.titleWin;
+      document.getElementById("meta-win").innerText = t.metaWin;
       document.getElementById("desc-win").innerText = t.descWin;
       document.getElementById("btn-win-exe").innerText = t.btnWinExe;
       document.getElementById("btn-win-zip").innerText = t.btnWinZip;
+      document.getElementById("lbl-win-feat").innerText = t.lblWinFeat;
+      document.getElementById("hint-win").innerText = t.hintWin;
+      document.getElementById("title-linux").innerText = t.titleLinux;
+      document.getElementById("meta-linux").innerText = t.metaLinux;
       document.getElementById("desc-linux").innerText = t.descLinux;
       document.getElementById("btn-linux-sh").innerText = t.btnLinuxSh;
       document.getElementById("btn-linux-tar").innerText = t.btnLinuxTar;
       document.getElementById("lbl-linux-cmd").innerText = t.lblLinuxCmd;
+      document.getElementById("hint-linux").innerText = t.hintLinux;
       document.getElementById("secDirectTitle").innerText = t.secDirectTitle;
       document.getElementById("secDirectDesc").innerText = t.secDirectDesc;
       document.getElementById("secPayTitle").innerText = t.secPayTitle;
       document.getElementById("secPayDesc").innerText = t.secPayDesc;
+      document.getElementById("tgTitle").innerText = t.tgTitle;
+      document.getElementById("tgSub").innerText = t.tgSub;
+      document.getElementById("ghSub").innerText = t.ghSub;
+      document.getElementById("kofiSub").innerText = t.kofiSub;
+      document.getElementById("lemonSub").innerText = t.lemonSub;
+      document.getElementById("boostySub").innerText = t.boostySub;
+      document.getElementById("footerText").innerText = t.footerText;
       detectSystem();
     }
 
     window.addEventListener("DOMContentLoaded", () => {
       const navLang = (navigator.language || navigator.userLanguage || "ru").slice(0, 2).toLowerCase();
-      if (["ru", "en", "es"].includes(navLang)) {
+      if (["ru", "en", "es", "zh", "ja"].includes(navLang)) {
         document.getElementById("langSelect").value = navLang;
         switchLang(navLang);
       } else {

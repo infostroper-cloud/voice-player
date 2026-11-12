@@ -3484,6 +3484,11 @@ class VoicePlayerApp:
         self._tt(ttk.Button(tts_btns, text="📨", width=3, style="Toggle.TButton", command=self._send_to_telegram),
                  "Отправить текст из поля в Telegram").pack(side="left", padx=(4, 0))
 
+        def _on_input_key_release(_e=None):
+            if not self.tts_input.get("1.0", "end").strip():
+                try: self.tts_input.configure(height=3)
+                except Exception: pass
+        self.tts_input.bind("<KeyRelease>", _on_input_key_release)
         self.tts_input.bind("<Control-Return>", lambda e: (self._speak_input(), "break")[1])
         self.tts_input.bind("<Control-KeyPress>", self._input_ctrl)
         self.tts_input.bind("<<Paste>>", self._on_input_paste)
@@ -3682,6 +3687,17 @@ class VoicePlayerApp:
         self.root.bind("<Control-Key-2>", lambda e: self._set_rate_pill(1.25))
         self.root.bind("<Control-Key-3>", lambda e: self._set_rate_pill(1.5))
         self.root.bind("<Control-Key-4>", lambda e: self._set_rate_pill(2.0))
+        self.root.bind("<Control-equal>", lambda e: self._nudge_rate(+0.1))
+        self.root.bind("<Control-plus>", lambda e: self._nudge_rate(+0.1))
+        self.root.bind("<Control-minus>", lambda e: self._nudge_rate(-0.1))
+        self.root.bind("<Control-Key-0>", lambda e: self._set_rate_pill(1.0))
+        self.root.bind("<KeyPress-j>", lambda e: self._seek_relative(-5) if not isinstance(e.widget, (ttk.Entry, tk.Text)) else None)
+        self.root.bind("<KeyPress-l>", lambda e: self._seek_relative(+5) if not isinstance(e.widget, (ttk.Entry, tk.Text)) else None)
+        self.root.bind("<KeyPress-k>", lambda e: self.action_toggle() if not isinstance(e.widget, (ttk.Entry, tk.Text)) else None)
+        self.root.bind("<KeyPress-m>", lambda e: self._toggle_dnd_quick() if not isinstance(e.widget, (ttk.Entry, tk.Text)) else None)
+        self.root.bind("<F2>", lambda e: self._toggle_edit_text())
+        self.root.bind("<Control-n>", lambda e: (self.tts_input.delete("1.0", "end"), self.tts_input.configure(height=3), self.tts_input.focus_set()) if hasattr(self, "tts_input") else None)
+        self.root.bind("<Control-Shift-F>", lambda e: self.ent_search.focus_set() if hasattr(self, "ent_search") else None)
 
         self._update_filter_pills()
         self._update_rate_pills()
@@ -4383,6 +4399,14 @@ class VoicePlayerApp:
         self.var_rate.set(max(0.5, min(2.0, v)))
         self._on_rate_change()
         self._set_status(f"скорость {v:g}×", ok=True)
+
+    def _nudge_rate(self, delta: float):
+        """Плавная регулировка скорости с клавиатуры (Ctrl++ / Ctrl+-)."""
+        cur = round(float(self.var_rate.get()) + delta, 2)
+        cur = max(0.5, min(2.0, cur))
+        self.var_rate.set(cur)
+        self._on_rate_change()
+        self._set_status(f"{vp_i18n.t('rate')}: {cur:g}×", ok=True)
 
     def _apply_tools_state(self):
         """Показать/спрятать сворачиваемый ящик «Инструменты»."""
@@ -6838,6 +6862,8 @@ class VoicePlayerApp:
 
     # ------------------ загрузка аудиофайла + транскрибация ------------------
     def _setup_tray(self):
+        if not IS_WIN:
+            return
         try:
             import pystray
         except Exception as e:
@@ -7833,7 +7859,7 @@ class VoicePlayerApp:
         w = tk.Toplevel(self.root)
         w.title(vp_i18n.t("shortcuts_title"))
         w.configure(bg=c["bg"])
-        self._center_over_root(w, 560, 520)
+        self._center_over_root(w, 580, 560)
         w.transient(self.root)
 
         box = ttk.Frame(w, padding=18)
@@ -7841,29 +7867,66 @@ class VoicePlayerApp:
 
         ttk.Label(box, text="⌨ " + vp_i18n.t("shortcuts_title"), font=("Segoe UI Semibold", 13)).pack(anchor="w", pady=(0, 10))
 
+        lang = vp_i18n.get_lang()
+        cat_play = vp_i18n.t("tab_playback")
+        cat_ctrl = vp_i18n.t("control")
+        cat_q = vp_i18n.t("queue")
+
+        DESCS = {
+            "space": {"ru": "Пауза / Продолжить", "en": "Play / Pause toggle", "es": "Pausa / Reanudar", "zh": "播放 / 暂停切换", "ja": "再生 / 一時停止の切替", "de": "Wiedergabe / Pause", "fr": "Lecture / Pause", "hi": "रोकें / जारी रखें"},
+            "ctrl_enter": {"ru": "Озвучить текст из поля ввода", "en": "Speak text from input box", "es": "Leer texto del campo", "zh": "朗读输入框中的文本", "ja": "入力欄のテキストを読み上げ", "de": "Text aus Eingabefeld vorlesen", "fr": "Lire le texte du champ", "hi": "इनपुट बॉक्स से टेक्स्ट बोलें"},
+            "arrows_lr": {"ru": "Следующая / Предыдущая реплика", "en": "Next / Previous item", "es": "Siguiente / Anterior elemento", "zh": "下一条 / 上一条", "ja": "次 / 前のアイテム", "de": "Nächstes / Vorheriges Element", "fr": "Élément suivant / précédent", "hi": "अगला / पिछला आइटम"},
+            "ctrl_lr": {"ru": "Перемотка на ±10 сек", "en": "Seek ±10 sec", "es": "Avanzar/retroceder ±10 seg", "zh": "快进/快退 ±10秒", "ja": "シーク ±10秒", "de": "Spulen ±10 Sek", "fr": "Avance/retour ±10 sec", "hi": "±10 सेकंड आगे/पीछे"},
+            "jl_seek": {"ru": "Перемотка на ±5 сек (YouTube стиль)", "en": "Seek ±5 sec (YouTube style)", "es": "Avanzar/retroceder ±5 seg (estilo YouTube)", "zh": "快进/快退 ±5秒 (YouTube风格)", "ja": "シーク ±5秒 (YouTubeスタイル)", "de": "Spulen ±5 Sek (YouTube-Stil)", "fr": "Avance/retour ±5 sec (style YouTube)", "hi": "±5 सेकंड आगे/पीछे"},
+            "shift_lr": {"ru": "Переход к след. / пред. предложению", "en": "Jump to next / prev sentence", "es": "Saltar a siguiente / anterior frase", "zh": "跳转到下/上一句", "ja": "次 / 前の文にジャンプ", "de": "Zum nächsten / vorherigen Satz", "fr": "Phrase suivante / précédente", "hi": "अगले/पिछले वाक्य पर जाएं"},
+            "repeat": {"ru": "Повторить текущую реплику сначала", "en": "Repeat current item from start", "es": "Repetir elemento actual", "zh": "从头重复当前条目", "ja": "現在のアイテムを最初からリピート", "de": "Aktuelles Element von vorne wiederholen", "fr": "Répéter l'élément actuel", "hi": "वर्तमान आइटम को दोहराएं"},
+            "ctrl_num": {"ru": "Пресеты скорости (1.0x / 1.25x / 1.5x / 2.0x)", "en": "Speed presets (1.0x / 1.25x / 1.5x / 2.0x)", "es": "Preajustes de velocidad (1.0x / 1.25x / 1.5x / 2.0x)", "zh": "速度预设 (1.0x / 1.25x / 1.5x / 2.0x)", "ja": "速度プリセット (1.0x / 1.25x / 1.5x / 2.0x)", "de": "Geschwindigkeits-Presets", "fr": "Préréglages de vitesse", "hi": "गति प्रीसेट"},
+            "ctrl_pm": {"ru": "Плавная регулировка скорости (±0.1x / сброс 1.0x)", "en": "Fine-tune speed (±0.1x / reset 1.0x)", "es": "Ajuste fino de velocidad (±0.1x / reset)", "zh": "微调速度 (±0.1x / 重置)", "ja": "速度の微調整 (±0.1x / リセット)", "de": "Feinabstimmung Geschwindigkeit (±0.1x)", "fr": "Réglage fin de la vitesse (±0.1x)", "hi": "गति को सूक्ष्म समायोजित करें"},
+            "help": {"ru": "Справка по горячим клавишам", "en": "Keyboard shortcuts help", "es": "Ayuda de atajos de teclado", "zh": "快捷键帮助", "ja": "ショートカットキーのヘルプ", "de": "Hilfe zu Tastaturkurzbefehlen", "fr": "Aide sur les raccourcis", "hi": "कीबोर्ड शॉर्टकट सहायता"},
+            "settings": {"ru": "Настройки программы", "en": "Settings", "es": "Configuración", "zh": "设置", "ja": "設定", "de": "Einstellungen", "fr": "Paramètres", "hi": "सेटिंग्स"},
+            "dnd": {"ru": "Режим «Не беспокоить» (тишина)", "en": "Do Not Disturb (quiet mode)", "es": "Modo no molestar (silencio)", "zh": "勿扰模式 (静音)", "ja": "応答なしモード (サイレント)", "de": "Nicht stören (Ruhemodus)", "fr": "Mode Ne pas déranger", "hi": "परेशान न करें (शांत मोड)"},
+            "tools": {"ru": "Панель инструментов (свернуть/развернуть)", "en": "Tools drawer (expand/collapse)", "es": "Panel de herramientas", "zh": "工具箱面板 (展开/折叠)", "ja": "ツールパネル (開閉)", "de": "Werkzeugleiste (ein-/ausklappen)", "fr": "Volet d'outils", "hi": "टूल्स पैनल"},
+            "clear_field": {"ru": "Очистить поле своего текста (Ctrl+N: очистить и фокус)", "en": "Clear text field (Ctrl+N: clear & focus)", "es": "Limpiar campo de texto", "zh": "清空文本框 (Ctrl+N: 清空并聚焦)", "ja": "テキスト欄をクリア (Ctrl+N: クリアとフォーカス)", "de": "Textfeld leeren", "fr": "Effacer le champ de texte", "hi": "टेक्स्ट फ़ील्ड साफ़ करें"},
+            "focus_input": {"ru": "Фокус в поле ввода текста", "en": "Focus text input box", "es": "Enfocar campo de texto", "zh": "聚焦到文本输入框", "ja": "入力欄にフォーカス", "de": "Fokus auf Eingabefeld", "fr": "Curseur dans le champ de texte", "hi": "टेक्स्ट इनपुट बॉक्स पर ध्यान केंद्रित करें"},
+            "dictate": {"ru": "Голосовая диктовка микрофоном", "en": "Voice dictation with microphone", "es": "Dictado por voz con micrófono", "zh": "麦克风语音听写", "ja": "マイクによる音声入力", "de": "Sprachdiktat mit Mikrofon", "fr": "Dictée vocale au microphone", "hi": "माइक्रोफ़ोन से वॉयс डिक्टेशन"},
+            "edit": {"ru": "Редактировать текст реплики", "en": "Edit reply text", "es": "Editar texto del elemento", "zh": "编辑当前文本", "ja": "テキストを編集", "de": "Text bearbeiten", "fr": "Modifier le texte", "hi": "टेक्स्ट संपादित करें"},
+            "save_mp3": {"ru": "Сохранить текущую озвучку в MP3", "en": "Save current voice to MP3", "es": "Guardar voz actual en MP3", "zh": "将当前语音保存为 MP3", "ja": "現在の音声をMP3で保存", "de": "Aktuelle Sprachausgabe als MP3 speichern", "fr": "Enregistrer l'audio en MP3", "hi": "वर्तमान आवाज़ को MP3 में सहेजें"},
+            "del_item": {"ru": "Удалить выбранную реплику", "en": "Delete selected item", "es": "Eliminar elemento seleccionado", "zh": "删除所选条目", "ja": "選択したアイテムを削除", "de": "Ausgewähltes Element löschen", "fr": "Supprimer l'élément sélectionné", "hi": "चयनित आइटम हटाएं"},
+            "clear_q": {"ru": "Очистить всю очередь", "en": "Clear entire queue", "es": "Limpiar toda la cola", "zh": "清空整个队列", "ja": "キュー全体をクリア", "de": "Ganze Warteschlange leeren", "fr": "Vider toute la file d'attente", "hi": "पूरी कतार साफ़ करें"},
+            "search": {"ru": "Поиск и фильтр по тексту", "en": "Search & filter by text", "es": "Buscar y filtrar por texto", "zh": "按文本搜索和过滤", "ja": "テキストで検索・フィルター", "de": "Nach Text suchen & filtern", "fr": "Recherche et filtre par texte", "hi": "टेक्स्ट द्वारा खोजें और फ़िल्टर करें"},
+            "f5_ai": {"ru": "Подтянуть свежие диалоги ИИ", "en": "Fetch fresh AI conversations", "es": "Actualizar diálogos de IA recientes", "zh": "抓取最新 AI 对话", "ja": "最新のAI対話を取得", "de": "Neueste KI-Gespräche abrufen", "fr": "Récupérer les conversations IA", "hi": "ताज़ा AI बातचीत प्राप्त करें"},
+            "escape": {"ru": "Снять выделение / Закрыть поиск", "en": "Clear selection / Close search", "es": "Deseleccionar / Cerrar búsqueda", "zh": "取消选择 / 关闭搜索", "ja": "選択解除 / 検索を閉じる", "de": "Auswahl aufheben / Suche schließen", "fr": "Désélectionner / Fermer la recherche", "hi": "चयन साफ़ करें / खोज बंद करें"}
+        }
+
+        def d(key):
+            entry = DESCS.get(key, {})
+            return entry.get(lang) or entry.get("en") or key
+
         # Список горячих клавиш: (Категория, Комбинация, Действие)
         shortcuts = [
-            ("Воспроизведение", "Space", "Пауза / Продолжить"),
-            ("Воспроизведение", "Ctrl + Enter", "Озвучить текст из поля ввода"),
-            ("Воспроизведение", "→  /  ←", "Следующая / Предыдущая реплика"),
-            ("Воспроизведение", "Ctrl + →  /  ←", "Перемотка на ±10 сек"),
-            ("Воспроизведение", "Shift + →  /  ←", "Переход к след. / пред. предложению"),
-            ("Воспроизведение", "R", "Повторить текущую реплику"),
-            ("Воспроизведение", "Ctrl + 1 / 2 / 3 / 4", "Скорость (1.0x / 1.25x / 1.5x / 2.0x)"),
-            ("Управление", "F1  /  Ctrl + H", "Справка по горячим клавишам"),
-            ("Управление", "Ctrl + , (запятая)", "Настройки программы"),
-            ("Управление", "Ctrl + M", "Режим «Не беспокоить» (тишина)"),
-            ("Управление", "Ctrl + T", "Панель инструментов (свернуть/развернуть)"),
-            ("Управление", "Ctrl + L", "Очистить поле своего текста"),
-            ("Управление", "Ctrl + I", "Фокус в поле ввода текста"),
-            ("Управление", "Ctrl + D", "Голосовая диктовка микрофоном"),
-            ("Управление", "Ctrl + E", "Редактировать текст реплики"),
-            ("Управление", "Ctrl + S", "Сохранить текущую озвучку в MP3"),
-            ("Очередь", "Ctrl + Del", "Удалить выбранную реплику"),
-            ("Очередь", "Ctrl + Shift + L", "Очистить всю очередь"),
-            ("Очередь", "Ctrl + F", "Поиск и фильтр по тексту"),
-            ("Очередь", "F5", "Подтянуть свежие диалоги ИИ"),
-            ("Очередь", "Esc", "Снять выделение / Закрыть поиск"),
+            (cat_play, "Space  /  K", d("space")),
+            (cat_play, "Ctrl + Enter", d("ctrl_enter")),
+            (cat_play, "→  /  ←", d("arrows_lr")),
+            (cat_play, "Ctrl + →  /  ←", d("ctrl_lr")),
+            (cat_play, "J  /  L", d("jl_seek")),
+            (cat_play, "Shift + →  /  ←", d("shift_lr")),
+            (cat_play, "R", d("repeat")),
+            (cat_play, "Ctrl + 1 / 2 / 3 / 4", d("ctrl_num")),
+            (cat_play, "Ctrl + + / - / 0", d("ctrl_pm")),
+            (cat_ctrl, "F1  /  Ctrl + H", d("help")),
+            (cat_ctrl, "Ctrl + , (запятая)", d("settings")),
+            (cat_ctrl, "Ctrl + M  /  M", d("dnd")),
+            (cat_ctrl, "Ctrl + T", d("tools")),
+            (cat_ctrl, "Ctrl + L  /  Ctrl + N", d("clear_field")),
+            (cat_ctrl, "Ctrl + I", d("focus_input")),
+            (cat_ctrl, "Ctrl + D", d("dictate")),
+            (cat_ctrl, "Ctrl + E  /  F2", d("edit")),
+            (cat_ctrl, "Ctrl + S", d("save_mp3")),
+            (cat_q, "Ctrl + Del", d("del_item")),
+            (cat_q, "Ctrl + Shift + L", d("clear_q")),
+            (cat_q, "Ctrl + F  /  Ctrl + Shift + F", d("search")),
+            (cat_q, "F5", d("f5_ai")),
+            (cat_q, "Esc", d("escape")),
         ]
 
         canvas = tk.Canvas(box, bg=c["panel"], highlightthickness=0)

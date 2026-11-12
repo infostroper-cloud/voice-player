@@ -17,14 +17,24 @@ esac
 
 echo "Detected platform: $PLATFORM"
 
-# Select best Python binary (prefer Homebrew Python on macOS if available)
+# Select best Python binary (prefer Homebrew or python.org Python on macOS if available)
 PY_BIN=""
 if [ "$PLATFORM" = "macOS" ]; then
-    if [ -x "/opt/homebrew/bin/python3" ]; then
-        PY_BIN="/opt/homebrew/bin/python3"
-    elif [ -x "/usr/local/bin/python3" ]; then
-        PY_BIN="/usr/local/bin/python3"
-    fi
+    for candidate in \
+        "/opt/homebrew/bin/python3" \
+        "/usr/local/bin/python3" \
+        "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3" \
+        "/Library/Frameworks/Python.framework/Versions/3.11/bin/python3" \
+        "/Library/Frameworks/Python.framework/Versions/3.10/bin/python3" \
+        "$HOME/.pyenv/shims/python3" \
+        "$HOME/miniconda3/bin/python3" \
+        "$HOME/miniforge3/bin/python3"
+    do
+        if [ -x "$candidate" ]; then
+            PY_BIN="$candidate"
+            break
+        fi
+    done
 fi
 
 if [ -z "$PY_BIN" ]; then
@@ -38,15 +48,27 @@ if [ -z "$PY_BIN" ]; then
     fi
 fi
 
-PY_VER=$($PY_BIN -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
+PY_VER=$($PY_BIN -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")' 2>/dev/null || echo "unknown")
 echo "Using Python: $PY_BIN (version $PY_VER)"
 
 # Test Tkinter GUI capability
-if ! $PY_BIN -c "import tkinter as tk; r = tk.Tk(); r.withdraw(); r.destroy()" >/dev/null 2>&1; then
+HAS_TK=0
+if $PY_BIN -c "import tkinter as tk; r = tk.Tk(); r.withdraw(); r.destroy()" >/dev/null 2>&1; then
+    HAS_TK=1
+fi
+
+if [ "$HAS_TK" -eq 0 ]; then
     echo "⚠️ Warning: Tkinter GUI could not initialize on current Python ($PY_BIN)."
     if [ "$PLATFORM" = "macOS" ]; then
-        echo "  👉 On macOS: please install official Python 3.12 from https://www.python.org"
-        echo "     or install Homebrew python-tk: 'brew install python-tk'"
+        echo "=========================================================="
+        echo "💡 IMPORTANT FOR macOS USERS:"
+        echo "Apple's CommandLineTools Python lacks full Tkinter GUI support."
+        echo "To use VoicePlayer with graphic UI, please either:"
+        echo "  1) Install Python via Homebrew (recommended):"
+        echo "     brew install python python-tk"
+        echo "  2) Or install official Python 3.12 for macOS:"
+        echo "     https://www.python.org/downloads/macos/"
+        echo "=========================================================="
     else
         echo "  👉 On Ubuntu/Debian: run 'sudo apt update && sudo apt install -y python3-tk libportaudio2'"
         echo "  👉 On Fedora/RHEL: run 'sudo dnf install -y python3-tkinter portaudio'"
@@ -191,10 +213,15 @@ fi
 echo "=========================================================="
 echo "🎉 VoicePlayer v1.2.0 installed successfully!"
 echo "Run from terminal: ~/.local/bin/voiceplayer"
-echo "Or start now..."
+if [ "$PLATFORM" = "macOS" ]; then
+    echo "Or launch from Finder: ~/Applications/VoicePlayer.command"
+fi
 echo "=========================================================="
 
-# Start in background if GUI session is active
-if [ -n "$DISPLAY" ] || [ "$PLATFORM" = "macOS" ]; then
-    nohup "$LOCAL_LAUNCHER" >> "$INSTALL_DIR/crash.log" 2>&1 &
+# Start in background if GUI session is active and Tkinter works
+if [ "$HAS_TK" -eq 1 ] && { [ -n "$DISPLAY" ] || [ "$PLATFORM" = "macOS" ]; }; then
+    nohup "$LOCAL_LAUNCHER" >/dev/null 2>"$INSTALL_DIR/crash.log" &
+elif [ "$PLATFORM" = "macOS" ] && [ "$HAS_TK" -eq 0 ]; then
+    echo "ℹ️  Skipped automatic launch because Tkinter is missing."
+    echo "   After running 'brew install python python-tk', start with: ~/.local/bin/voiceplayer"
 fi

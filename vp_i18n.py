@@ -216,6 +216,8 @@ STRINGS: Dict[str, Dict[str, str]] = {
         "author": "Author",
         "date": "Date",
         "filter_all": "all",
+        "rate": "Speed",
+        "control": "Controls",
     },
     "ru": {
         "app_title": "VoicePlayer — Озвучка ИИ и голосовой ввод",
@@ -395,6 +397,8 @@ STRINGS: Dict[str, Dict[str, str]] = {
         "author": "Автор",
         "date": "Дата",
         "filter_all": "все",
+        "rate": "Темп",
+        "control": "Управление",
     },
     "es": {
         "app_title": "VoicePlayer — Reproductor de Voz IA",
@@ -574,6 +578,8 @@ STRINGS: Dict[str, Dict[str, str]] = {
         "author": "Autor",
         "date": "Fecha",
         "filter_all": "todos",
+        "rate": "Velocidad",
+        "control": "Control",
     },
     "zh": {
         "app_title": "VoicePlayer — AI语音播报播放器",
@@ -753,6 +759,8 @@ STRINGS: Dict[str, Dict[str, str]] = {
         "author": "作者",
         "date": "日期",
         "filter_all": "全部",
+        "rate": "语速",
+        "control": "控制",
     },
     "hi": {
         "app_title": "VoicePlayer — AI आवाज़ और टीटीएस प्लेयर",
@@ -932,6 +940,8 @@ STRINGS: Dict[str, Dict[str, str]] = {
         "author": "लेखक",
         "date": "दिनांक",
         "filter_all": "सभी",
+        "rate": "गति",
+        "control": "नियंत्रण",
     },
     "ja": {
         "app_title": "VoicePlayer — AI音声読み上げプレーヤー",
@@ -1111,6 +1121,8 @@ STRINGS: Dict[str, Dict[str, str]] = {
         "author": "作成者",
         "date": "日付",
         "filter_all": "すべて",
+        "rate": "速度",
+        "control": "操作",
     },
     "de": {
         "app_title": "VoicePlayer — KI-Sprachausgabe & TTS Player",
@@ -1290,6 +1302,8 @@ STRINGS: Dict[str, Dict[str, str]] = {
         "author": "Autor",
         "date": "Datum",
         "filter_all": "alle",
+        "rate": "Geschwindigkeit",
+        "control": "Steuerung",
     },
     "fr": {
         "app_title": "VoicePlayer — Lecteur Vocal IA & Synthèse Vocale",
@@ -1469,6 +1483,8 @@ STRINGS: Dict[str, Dict[str, str]] = {
         "author": "Auteur",
         "date": "Date",
         "filter_all": "tous",
+        "rate": "Vitesse",
+        "control": "Contrôles",
     },
 }
 
