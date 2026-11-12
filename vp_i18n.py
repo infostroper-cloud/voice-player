@@ -222,6 +222,7 @@ STRINGS: Dict[str, Dict[str, str]] = {
         "supporter_active_msg": "✓ Supporter key activated successfully! Thank you for supporting the project!",
         "supporter_invalid_msg": "⚠️ Invalid key format (expected VP-PRO-XXXX-XXXX-XXXX)",
         "accent_mint": "Mint",
+        "accent_red": "Red",
         "accent_blue": "Blue",
         "accent_graphite": "Graphite",
         "accent_green": "Green",
@@ -418,6 +419,7 @@ STRINGS: Dict[str, Dict[str, str]] = {
         "supporter_active_msg": "✓ Ключ Supporter успешно активирован! Спасибо за поддержку проекта!",
         "supporter_invalid_msg": "⚠️ Неверный формат ключа (ожидается VP-PRO-XXXX-XXXX-XXXX)",
         "accent_mint": "Мята",
+        "accent_red": "Красный",
         "accent_blue": "Синий",
         "accent_graphite": "Графит",
         "accent_green": "Зелёный",
@@ -614,6 +616,7 @@ STRINGS: Dict[str, Dict[str, str]] = {
         "supporter_active_msg": "✓ ¡Clave Supporter activada con éxito! ¡Gracias por apoyar el proyecto!",
         "supporter_invalid_msg": "⚠️ Formato de clave no válido (se espera VP-PRO-XXXX-XXXX-XXXX)",
         "accent_mint": "Menta",
+        "accent_red": "Rojo",
         "accent_blue": "Azul",
         "accent_graphite": "Grafito",
         "accent_green": "Verde",
@@ -810,6 +813,7 @@ STRINGS: Dict[str, Dict[str, str]] = {
         "supporter_active_msg": "✓ Supporter 密钥已成功激活！感谢您的支持！",
         "supporter_invalid_msg": "⚠️ 密钥格式无效（需要 VP-PRO-XXXX-XXXX-XXXX）",
         "accent_mint": "薄荷",
+        "accent_red": "红色",
         "accent_blue": "蓝色",
         "accent_graphite": "石墨",
         "accent_green": "绿色",
@@ -1006,6 +1010,7 @@ STRINGS: Dict[str, Dict[str, str]] = {
         "supporter_active_msg": "✓ सपोर्टर कुंजी सफलतापूर्वक सक्रिय हो गई! धन्यवाद!",
         "supporter_invalid_msg": "⚠️ अमान्य कुंजी प्रारूप (अपेक्षित VP-PRO-XXXX-XXXX-XXXX)",
         "accent_mint": "पुदीना",
+        "accent_red": "लाल",
         "accent_blue": "नीला",
         "accent_graphite": "ग्रेफाइट",
         "accent_green": "हरा",
@@ -1202,6 +1207,7 @@ STRINGS: Dict[str, Dict[str, str]] = {
         "supporter_active_msg": "✓ Supporterキーが有効化されました！ご支援ありがとうございます！",
         "supporter_invalid_msg": "⚠️ 無効なキー形式です (期待値: VP-PRO-XXXX-XXXX-XXXX)",
         "accent_mint": "ミント",
+        "accent_red": "レッド",
         "accent_blue": "青",
         "accent_graphite": "グラファイト",
         "accent_green": "緑",
@@ -1398,6 +1404,7 @@ STRINGS: Dict[str, Dict[str, str]] = {
         "supporter_active_msg": "✓ Supporter-Schlüssel erfolgreich aktiviert! Vielen Dank für Ihre Unterstützung!",
         "supporter_invalid_msg": "⚠️ Ungültiges Schlüsselformat (erwartet: VP-PRO-XXXX-XXXX-XXXX)",
         "accent_mint": "Pfefferminze",
+        "accent_red": "Rot",
         "accent_blue": "Blau",
         "accent_graphite": "Graphit",
         "accent_green": "Grün",
@@ -1594,6 +1601,7 @@ STRINGS: Dict[str, Dict[str, str]] = {
         "supporter_active_msg": "✓ Clé Supporter activée avec succès ! Merci pour votre soutien !",
         "supporter_invalid_msg": "⚠️ Format de clé invalide (attendu : VP-PRO-XXXX-XXXX-XXXX)",
         "accent_mint": "Menthe",
+        "accent_red": "Rouge",
         "accent_blue": "Bleu",
         "accent_graphite": "Graphite",
         "accent_green": "Vert",
@@ -2253,6 +2261,74 @@ TOOLTIP_MAP: Dict[str, Dict[str, str]] = {
 }
 
 _CURRENT_LANG = "en"
+
+STATUS_MAP: Dict[str, Dict[str, str]] = {
+    "реплика удалена": {
+        "en": "Message deleted", "ru": "реплика удалена", "es": "Mensaje eliminado", "zh": "回复已删除", "hi": "संदेश हटाया गया", "ja": "返信を削除しました", "de": "Nachricht gelöscht", "fr": "Message supprimé"
+    },
+    "текущая реплика удалена": {
+        "en": "Current message deleted", "ru": "текущая реплика удалена", "es": "Mensaje actual eliminado", "zh": "当前回复已删除", "hi": "वर्तमान संदेश हटाया गया", "ja": "現在の返信を削除しました", "de": "Aktuelle Nachricht gelöscht", "fr": "Message actuel supprimé"
+    },
+    "текст скопирован": {
+        "en": "Text copied", "ru": "текст скопирован", "es": "Texto copiado", "zh": "文本已复制", "hi": "टेक्स्ट कॉपी किया गया", "ja": "テキストをコピーしました", "de": "Text kopiert", "fr": "Texte copié"
+    },
+    "текст скопирован в буфер обмена": {
+        "en": "Text copied to clipboard", "ru": "текст скопирован в буфер обмена", "es": "Texto copiado al portapapeles", "zh": "文本已复制到剪贴板", "hi": "टेक्स्ट क्लिपबोर्ड पर कॉपी किया गया", "ja": "テキストをクリップボードにコピーしました", "de": "Text in die Zwischenablage kopiert", "fr": "Texte copié dans le presse-papiers"
+    },
+    "буфер пуст — выдели текст и снова нажми Ctrl+Alt+S": {
+        "en": "Clipboard is empty — select text and press Ctrl+Alt+S again", "ru": "буфер пуст — выдели текст и снова нажми Ctrl+Alt+S", "es": "Portapapeles vacío — selecciona texto y pulsa Ctrl+Alt+S de nuevo", "zh": "剪贴板为空 — 选中文本并再次按下 Ctrl+Alt+S", "hi": "क्लिपबोर्ड खाली है — टेक्स्ट चुनें और फिर से Ctrl+Alt+S दबाएं", "ja": "クリップボードが空です — テキストを選択して再度 Ctrl+Alt+S を押してください", "de": "Zwischenablage leer — Text markieren und erneut Strg+Alt+S drücken", "fr": "Presse-papiers vide — sélectionnez du texte et réappuyez sur Ctrl+Alt+S"
+    },
+    "поле пустое — вставь текст": {
+        "en": "Input field is empty — paste text first", "ru": "поле пустое — вставь текст", "es": "Campo vacío — pega texto primero", "zh": "输入框为空 — 请先粘贴文本", "hi": "फ़ील्ड खाली है — पहले टेक्स्ट चिपकाएं", "ja": "入力欄が空です — テキストを貼り付けてください", "de": "Eingabefeld leer — bitte zuerst Text einfügen", "fr": "Le champ est vide — collez d'abord du texte"
+    },
+    "загружаю статью…": {
+        "en": "Loading article…", "ru": "загружаю статью…", "es": "Cargando artículo…", "zh": "正在载入文章…", "hi": "लेख लोड हो रहा है…", "ja": "記事を読み込み中…", "de": "Artikel wird geladen…", "fr": "Chargement de l'article…"
+    },
+    "статья добавлена в очередь": {
+        "en": "Article added to queue", "ru": "статья добавлена в очередь", "es": "Artículo añadido a la cola", "zh": "文章已添加到队列", "hi": "लेख कतार में जोड़ा गया", "ja": "記事をキューに追加しました", "de": "Artikel zur Warteschlange hinzugefügt", "fr": "Article ajouté à la file"
+    },
+    "таймер сна выключен": {
+        "en": "Sleep timer off", "ru": "таймер сна выключен", "es": "Temporizador de apagado desactivado", "zh": "睡眠定时器已关闭", "hi": "स्लीप टाइमर बंद है", "ja": "スリープタイマーをオフにしました", "de": "Schlaftimer aus", "fr": "Minuteur de veille désactivé"
+    },
+    "таймер сна сработал — воспроизведение остановлено": {
+        "en": "Sleep timer triggered — playback stopped", "ru": "таймер сна сработал — воспроизведение остановлено", "es": "Temporizador activado — reproducción detenida", "zh": "睡眠定时器已触发 — 播放已停止", "hi": "स्लीप टाइमर बज गया — प्लेबैक बंद", "ja": "スリープタイマーが作動しました — 再生を停止しました", "de": "Schlaftimer abgelaufen — Wiedergabe gestoppt", "fr": "Minuteur écoulé — lecture arrêtée"
+    },
+    "правки применены": {
+        "en": "Changes applied", "ru": "правки применены", "es": "Cambios aplicados", "zh": "修改已应用", "hi": "बदलाव लागू किए गए", "ja": "変更を適用しました", "de": "Änderungen angewendet", "fr": "Modifications appliquées"
+    },
+    "A-B повтор сброшен": {
+        "en": "A-B repeat cleared", "ru": "A-B повтор сброшен", "es": "Repetición A-B restablecida", "zh": "A-B 循环已重置", "hi": "A-B दोहराव रीसेट किया गया", "ja": "A-B リピートをリセットしました", "de": "A-B-Wiederholung zurückgesetzt", "fr": "Répétition A-B réinitialisée"
+    },
+    "подтягиваю последние диалоги из Antigravity и Codex…": {
+        "en": "Fetching latest dialogues from Antigravity and Codex…", "ru": "подтягиваю последние диалоги из Antigravity и Codex…", "es": "Sincronizando diálogos recientes de Antigravity y Codex…", "zh": "正在拉取 Antigravity 和 Codex 的最新对话…", "hi": "Antigravity और Codex से नवीनतम संवाद ला रहे हैं…", "ja": "Antigravity と Codex から最新の対話を取得中…", "de": "Neueste Dialoge von Antigravity und Codex werden abgerufen…", "fr": "Récupération des derniers dialogues d'Antigravity et Codex…"
+    },
+    "установлена последняя версия": {
+        "en": "Latest version is installed", "ru": "установлена последняя версия", "es": "Ya tienes la última versión instalada", "zh": "已安装最新版本", "hi": "नवीनतम संस्करण स्थापित है", "ja": "最新バージョンがインストールされています", "de": "Neueste Version ist installiert", "fr": "La dernière version est installée"
+    },
+    "аудио-движок не отвечает — перезапусти плеер": {
+        "en": "Audio engine not responding — please restart player", "ru": "аудио-движок не отвечает — перезапусти плеер", "es": "Motor de audio no responde — reinicia el reproductor", "zh": "音频引擎未响应 — 请重启播放器", "hi": "ऑडियो इंजन प्रतिक्रिया नहीं दे रहा है — कृपया प्लेयर पुनः आरंभ करें", "ja": "オーディオエンジンが応答しません — プレイヤーを再起動してください", "de": "Audio-Engine reagiert nicht — bitte Player neu starten", "fr": "Le moteur audio ne répond pas — veuillez redémarrer le lecteur"
+    },
+}
+
+def translate_status(text: str) -> str:
+    """Динамический перевод системных статусов на текущий язык."""
+    if not text:
+        return ""
+    cur = get_lang()
+    if cur == "ru":
+        return text
+    if text in STATUS_MAP:
+        return STATUS_MAP[text].get(cur, STATUS_MAP[text].get("en", text))
+    norm = text.replace("→", "->").replace("—", "-").strip()
+    for k, v in STATUS_MAP.items():
+        if k.replace("→", "->").replace("—", "-").strip() == norm:
+            return v.get(cur, v.get("en", text))
+    if text.startswith("таймер сна: остановлю через "):
+        parts = text.split(" через ")
+        if len(parts) == 2:
+            mins_part = parts[1].replace(" мин", "").strip()
+            return f"{t('menu_sleep_timer')}: {mins_part} {t('min_short')}"
+    return text
 
 def detect_system_lang() -> str:
     """Определить системный язык пользователя (en, ru, es, etc.)."""

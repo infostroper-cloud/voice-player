@@ -2255,6 +2255,12 @@ class VoicePlayerApp:
         saved_lang = self.prefs.get("lang") or vp_i18n.detect_system_lang()
         vp_i18n.set_lang(saved_lang)
         self.var_lang = tk.StringVar(value=saved_lang)
+        self.var_filter_author.set(vp_i18n.t("filter_all"))
+        self.var_filter_date.set(vp_i18n.t("filter_all"))
+        saved_mode = self.prefs.get("mode", "Очередь")
+        mode_idx = self._parse_mode_to_idx(saved_mode)
+        mode_vals = self._get_mode_values()
+        self.var_mode.set(mode_vals[mode_idx])
         threading.Thread(target=self._update_loop, daemon=True, name="update").start()
         if vp_piper.is_local(self._voice):  # голос в памяти заранее — первая реплика не ждёт загрузки
             threading.Thread(target=self._preload_voice, args=(self._voice,), daemon=True, name="voice-preload").start()
@@ -2868,18 +2874,10 @@ class VoicePlayerApp:
             if hasattr(self, "lbl_mode_title"):
                 self.lbl_mode_title.configure(text=vp_i18n.t("mode") + ":")
             if hasattr(self, "cmb_mode"):
-                cur_mode_idx = self.cmb_mode.current()
-                m_vals = [
-                    vp_i18n.t("mode_queue"),
-                    vp_i18n.t("mode_repeat_one"),
-                    vp_i18n.t("mode_repeat_all"),
-                    vp_i18n.t("mode_shuffle"),
-                ]
+                cur_mode_idx = self._get_mode_index()
+                m_vals = self._get_mode_values()
                 self.cmb_mode["values"] = m_vals
-                if 0 <= cur_mode_idx < len(m_vals):
-                    self.var_mode.set(m_vals[cur_mode_idx])
-                else:
-                    self.var_mode.set(m_vals[0])
+                self.var_mode.set(m_vals[cur_mode_idx if 0 <= cur_mode_idx < len(m_vals) else 0])
 
             # Фильтры автора, даты и сброса
             if hasattr(self, "lbl_filt_author"):
@@ -3296,7 +3294,7 @@ class VoicePlayerApp:
         self._accent_colors = {"Мята": "#7ee2b8", "Красный": "#fc3c44", "Синий": "#0a84ff",
                                "Графит": "#48484a", "Зелёный": "#34c759", "Фиолетовый": "#af52de"}
         self.var_theme = tk.StringVar(value=self.prefs.get("theme", "Тёмная"))
-        self.var_sleep = tk.StringVar(value="выкл")
+        self.var_sleep = tk.StringVar(value=vp_i18n.t("off"))
         self.var_accent = tk.StringVar(value=next(
             (k for k, v in self._accent_colors.items() if v == self.prefs.get("accent", "#7ee2b8")),
             "Мята"))
@@ -3414,7 +3412,7 @@ class VoicePlayerApp:
         self.lbl_mode_title = ttk.Label(abrow, text=vp_i18n.t("mode") + ":", style="Dim.TLabel")
         self.lbl_mode_title.pack(side="left", padx=(12, 4))
         self.cmb_mode = ttk.Combobox(abrow, textvariable=self.var_mode, state="readonly", width=14,
-                                     values=[vp_i18n.t("mode_queue"), vp_i18n.t("mode_repeat_one"), vp_i18n.t("mode_repeat_all"), vp_i18n.t("mode_shuffle")])
+                                     values=self._get_mode_values())
         self.cmb_mode.pack(side="left")
         self.cmb_mode.bind("<<ComboboxSelected>>", lambda e: self._save_prefs())
         self._apply_adv_state()
@@ -3486,10 +3484,10 @@ class VoicePlayerApp:
         pills_bar.grid(row=2, column=0, sticky="ew", pady=(6, 0))
         self._src_pill_btns = {}
         for src_key, pill_lbl, tip_txt in (
-            ("all",      "Все",       "Все реплики в очереди"),
-            ("ai",       "Нейросети", "Ответы и диалоги Antigravity, Codex, Claude Code, Cursor, Gemini"),
-            ("board",    "Доска",     "Сообщения командной доски"),
-            ("favorite", "★",         "Избранные и закреплённые реплики"),
+            ("all",      vp_i18n.t("tab_all"),   "Все реплики в очереди"),
+            ("ai",       vp_i18n.t("tab_ai"),    "Ответы и диалоги Antigravity, Codex, Claude Code, Cursor, Gemini"),
+            ("board",    vp_i18n.t("tab_board"), "Сообщения командной доски"),
+            ("favorite", "★",                    "Избранные и закреплённые реплики"),
         ):
             b = ttk.Button(pills_bar, text=pill_lbl,
                            style="Toggle.TButton", command=lambda k=src_key: self._set_source_pill(k))
@@ -3854,7 +3852,8 @@ class VoicePlayerApp:
             self.filt_frame.pack_forget()
 
     def _set_status(self, text: str, ok: bool = True):
-        self.lbl_status.configure(text=text)
+        translated = vp_i18n.translate_status(text) if hasattr(vp_i18n, "translate_status") else text
+        self.lbl_status.configure(text=translated)
 
     def _set_source_pill(self, key: str):
         self.var_source.set(key)
@@ -4820,8 +4819,8 @@ class VoicePlayerApp:
             vp_i18n.t("tab_updates"),
         ]
         needed_w = sum(len(t) * 9 + 32 for t in tab_titles) + 60
-        win_w = max(780, min(1020, needed_w))
-        win_h = 530
+        win_w = max(860, min(1100, needed_w + 50))
+        win_h = 560
         win.transient(self.root); win.configure(bg=c["bg"]); self._center_over_root(win, win_w, win_h)
         win.minsize(win_w, win_h)
         win.resizable(True, True)
@@ -4936,6 +4935,7 @@ class VoicePlayerApp:
         ttk.Label(t3, text=vp_i18n.t("accent_color")).grid(row=3, column=0, sticky="w", pady=(8, 0))
         accent_keys = [
             ("Мята", vp_i18n.t("accent_mint")),
+            ("Красный", vp_i18n.t("accent_red")),
             ("Синий", vp_i18n.t("accent_blue")),
             ("Графит", vp_i18n.t("accent_graphite")),
             ("Зелёный", vp_i18n.t("accent_green")),
@@ -6299,11 +6299,41 @@ class VoicePlayerApp:
         it = self.queue_items[i]
         return (not it.deleted and it.author not in self._muted and self._source_allows(it))
 
+    @staticmethod
+    def _parse_mode_to_idx(mode_str: str) -> int:
+        s = str(mode_str or "").strip().lower()
+        if not s:
+            return 0
+        canonical_map = {
+            "очередь": 0, "queue": 0, "cola": 0, "キュー": 0, "warteschlange": 0, "file d'attente": 0, "कतार": 0, "队列": 0,
+            "повтор одной": 1, "repeat one": 1, "repetir una": 1, "1曲リピート": 1, "eine wiederholen": 1, "répéter un": 1, "एक दोहराएं": 1, "单曲循环": 1,
+            "повтор очереди": 2, "repeat all": 2, "repetir todo": 2, "全曲リピート": 2, "alle wiederholen": 2, "tout répéter": 2, "सभी दोहराएं": 2, "列表循环": 2,
+            "перемешать": 3, "shuffle": 3, "aleatorio": 3, "シャッフル": 3, "zufall": 3, "aléatoire": 3, "रैंडम": 3, "随机播放": 3,
+        }
+        for k, idx in canonical_map.items():
+            if k in s:
+                return idx
+        return 0
+
+    @staticmethod
+    def _get_mode_values() -> list[str]:
+        return [
+            vp_i18n.t("mode_queue"),
+            vp_i18n.t("mode_repeat_one"),
+            vp_i18n.t("mode_repeat_all"),
+            vp_i18n.t("mode_shuffle"),
+        ]
+
+    def _get_mode_index(self) -> int:
+        if hasattr(self, "cmb_mode") and self.cmb_mode.current() >= 0:
+            return self.cmb_mode.current()
+        return self._parse_mode_to_idx(self.var_mode.get() if hasattr(self, "var_mode") else "")
+
     def _auto_next_index(self) -> int:
-        cur_mode_idx = getattr(self, "cmb_mode", None) and self.cmb_mode.current()
-        mode = self.var_mode.get()
-        is_repeat_one = (cur_mode_idx == 1) or (mode == vp_i18n.t("mode_repeat_one")) or (mode == "Повтор одной")
-        is_shuffle = (cur_mode_idx == 3) or (mode == vp_i18n.t("mode_shuffle")) or (mode == "Перемешать")
+        mode_idx = self._get_mode_index()
+        is_repeat_one = (mode_idx == 1)
+        is_repeat_all = (mode_idx == 2)
+        is_shuffle = (mode_idx == 3)
         if is_repeat_one and 0 <= self.current_idx < len(self.queue_items):
             self.queue_items[self.current_idx].played = False
             return self.current_idx
@@ -6317,7 +6347,7 @@ class VoicePlayerApp:
                          if self._playable(i) and i != self.current_idx]
             return random.choice(cands) if cands else -1
         nxt = self._find_next(self.current_idx + 1)
-        if nxt < 0 and mode == "Повтор очереди":
+        if nxt < 0 and is_repeat_all:
             for it in self.queue_items:
                 if self._source_allows(it): it.played = False
             nxt = self._find_next(0)
