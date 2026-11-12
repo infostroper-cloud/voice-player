@@ -2888,10 +2888,25 @@ class VoicePlayerApp:
                 self.lbl_filt_date.configure(text=vp_i18n.t("date") + ":")
             if hasattr(self, "btn_filt_reset"):
                 self.btn_filt_reset.configure(text=vp_i18n.t("reset"))
-            if hasattr(self, "var_filter_author") and self.var_filter_author.get() in ("все", "all", "todos", "全部", "すべて"):
+            ALL_FILTER_VALUES = {"все", "all", "todos", "全部", "सभी", "すべて", "alle", "tous", ""}
+            if hasattr(self, "var_filter_author") and self.var_filter_author.get() in ALL_FILTER_VALUES:
                 self.var_filter_author.set(vp_i18n.t("filter_all"))
-            if hasattr(self, "var_filter_date") and self.var_filter_date.get() in ("все", "all", "todos", "全部", "すべて"):
+            if hasattr(self, "var_filter_date") and self.var_filter_date.get() in ALL_FILTER_VALUES:
                 self.var_filter_date.set(vp_i18n.t("filter_all"))
+            if hasattr(self, "lbl_now_prompt") and hasattr(self, "prompt_frame") and self.prompt_frame.winfo_ismapped():
+                cur_item = self.queue_items[self.current_idx] if 0 <= self.current_idx < len(self.queue_items) else None
+                if cur_item and getattr(cur_item, "prompt", ""):
+                    prompt_flat = " ".join(cur_item.prompt.split())
+                    if len(prompt_flat) > 220:
+                        prompt_flat = prompt_flat[:220] + "…"
+                    self.lbl_now_prompt.configure(text=f"💬 {vp_i18n.t('prompt_label')}: {prompt_flat}")
+            if hasattr(self, "lbl_now_author") and self.current_idx < 0:
+                self.lbl_now_author.configure(text=vp_i18n.t("empty_hero_hint"))
+            if hasattr(self, "_list_menu") and hasattr(self, "_sleep_menu_index"):
+                try:
+                    self._list_menu.entryconfigure(self._sleep_menu_index, label=self._sleep_remaining_label())
+                except Exception:
+                    pass
 
             # Пересоздать контекстное меню и меню списка с локализованными пунктами
             try:
@@ -3621,7 +3636,7 @@ class VoicePlayerApp:
 
         meta_left = ttk.Frame(text_head)
         meta_left.grid(row=0, column=0, sticky="w")
-        self.lbl_now_author = ttk.Label(meta_left, text="Выберите реплику или озвучьте текст", style="Hero.TLabel")
+        self.lbl_now_author = ttk.Label(meta_left, text=vp_i18n.t("empty_hero_hint"), style="Hero.TLabel")
         self.lbl_now_author.pack(side="left")
         self.lbl_now_time = ttk.Label(meta_left, text="", style="Dim.TLabel")
         self.lbl_now_time.pack(side="left", padx=(10, 0))
@@ -3760,7 +3775,7 @@ class VoicePlayerApp:
         # Нижняя строка статуса правой панели
         status_row = ttk.Frame(self.text_frame)
         status_row.grid(row=4, column=0, sticky="ew", pady=(6, 0))
-        self.lbl_status = ttk.Label(status_row, text="запуск…", style="Dim.TLabel")
+        self.lbl_status = ttk.Label(status_row, text=vp_i18n.t("status_launching"), style="Dim.TLabel")
         self.lbl_status.pack(side="left")
         self.lbl_hint = ttk.Label(status_row, text=vp_i18n.t("bottom_hint"),
                                   style="Dim.TLabel")
@@ -4625,12 +4640,13 @@ class VoicePlayerApp:
 
     # ------------------ таймер сна (реализация ниже, в _set_sleep_timer/_sleep_fire) ------------------
     def _sleep_remaining_label(self) -> str:
+        base = vp_i18n.t("menu_sleep_timer")
         if not self._sleep_deadline:
-            return "Таймер сна"
+            return base
         left = int(self._sleep_deadline - time.time())
         if left <= 0:
-            return "Таймер сна"
-        return f"Таймер сна (осталось {left // 60}:{left % 60:02d})"
+            return base
+        return f"{base} ({vp_i18n.t('left_short')}: {left // 60}:{left % 60:02d})"
 
     # ------------------ отметить всё прослушанным ------------------
     def _mark_all_played(self):
@@ -6220,11 +6236,11 @@ class VoicePlayerApp:
             return True
         if not self._source_allows_base(item):
             return False
+        ALL_FILTER_VALUES = {"все", "all", "todos", "全部", "सभी", "すべて", "alle", "tous", ""}
         fa = self.var_filter_author.get()
-        # фильтр сверяем и с оригиналом, и с отображаемым именем (в списке показаны псевдонимы)
-        if fa and fa != "все" and item.author != fa and self._disp_author(item.author) != fa: return False
+        if fa and fa not in ALL_FILTER_VALUES and fa != vp_i18n.t("filter_all") and item.author != fa and self._disp_author(item.author) != fa: return False
         fd = self.var_filter_date.get()
-        if fd and fd != "все" and item.date_str != fd: return False
+        if fd and fd not in ALL_FILTER_VALUES and fd != vp_i18n.t("filter_all") and item.date_str != fd: return False
         if self.search_query:
             haystack = (item.author + " " + item.text).lower()
             if self.search_query not in haystack: return False
@@ -6258,8 +6274,9 @@ class VoicePlayerApp:
         self._render_list()
 
     def _reset_filters(self):
-        self.var_filter_author.set("все")
-        self.var_filter_date.set("все")
+        all_lbl = vp_i18n.t("filter_all")
+        self.var_filter_author.set(all_lbl)
+        self.var_filter_date.set(all_lbl)
         self.sort_col = None
         self.sort_reverse = False
         self._render_list()
@@ -6574,9 +6591,9 @@ class VoicePlayerApp:
         idx = self._find_next(0)
         if idx >= 0:
             self._play_index(idx)
-            self._set_status("слушаю всё подряд — реплики читаются по очереди", ok=True)
+            self._set_status(vp_i18n.t("status_listening_all"), ok=True)
         else:
-            self._set_status("нет непрослушанных реплик", ok=True)
+            self._set_status(vp_i18n.t("status_no_unheard"), ok=True)
 
     def action_repeat(self):
         if self.current_idx < 0:
@@ -6599,14 +6616,23 @@ class VoicePlayerApp:
     def _render_list(self):
         # обновить списки фильтров (автор/дата) под текущую очередь
         try:
+            ALL_FILTER_VALUES = {"все", "all", "todos", "全部", "सभी", "すべて", "alle", "tous", ""}
+            all_lbl = vp_i18n.t("filter_all")
             authors = sorted({self._disp_author(m.author) for m in self.queue_items if not m.deleted and m.author})
-            self.cmb_author.configure(values=["все"] + authors)
-            if self.var_filter_author.get() not in (["все"] + authors):
-                self.var_filter_author.set("все")
+            self.cmb_author.configure(values=[all_lbl] + authors)
+            cur_fa = self.var_filter_author.get()
+            if cur_fa in ALL_FILTER_VALUES:
+                self.var_filter_author.set(all_lbl)
+            elif cur_fa not in ([all_lbl] + authors):
+                self.var_filter_author.set(all_lbl)
+
             dates = sorted({m.date_str for m in self.queue_items if not m.deleted and m.date_str})
-            self.cmb_date.configure(values=["все"] + dates)
-            if self.var_filter_date.get() not in (["все"] + dates):
-                self.var_filter_date.set("все")
+            self.cmb_date.configure(values=[all_lbl] + dates)
+            cur_fd = self.var_filter_date.get()
+            if cur_fd in ALL_FILTER_VALUES:
+                self.var_filter_date.set(all_lbl)
+            elif cur_fd not in ([all_lbl] + dates):
+                self.var_filter_date.set(all_lbl)
         except Exception:
             pass
         for row in self.tree.get_children():
@@ -6713,7 +6739,7 @@ class VoicePlayerApp:
                 prompt_flat = " ".join(item.prompt.split())
                 if len(prompt_flat) > 220:
                     prompt_flat = prompt_flat[:220] + "…"
-                self.lbl_now_prompt.configure(text=f"💬 Запрос: {prompt_flat}")
+                self.lbl_now_prompt.configure(text=f"💬 {vp_i18n.t('prompt_label')}: {prompt_flat}")
                 self.prompt_frame.grid()
             else:
                 self.prompt_frame.grid_remove()
@@ -7365,7 +7391,7 @@ class VoicePlayerApp:
         cc = getattr(self, "colors", None) or self._palette(self.var_theme.get())
         w = tk.Toplevel(self.root)
         self._ai_win = w
-        w.title("Подключение к нейросетям")
+        w.title(vp_i18n.t("ai_connect_title"))
         w.configure(bg=cc["panel"])
         self._center_over_root(w, 620, 460)
         w.transient(self.root)
@@ -7438,7 +7464,7 @@ class VoicePlayerApp:
                    command=lambda: self._pull_recent_ai(limit_per_source=8, silent=False)).pack(side="left")
         row += 1
 
-        ttk.Label(tab, text=vp_integrations.SELECTION_NOTE, style="Dim.TLabel", wraplength=560,
+        ttk.Label(tab, text=vp_i18n.t("ai_selection_note"), style="Dim.TLabel", wraplength=560,
                   justify="left").grid(row=row, column=0, columnspan=3, sticky="w", pady=(12, 0))
 
     def _tray_quit(self):
@@ -7921,7 +7947,7 @@ class VoicePlayerApp:
             # подпись таймера сна с остатком времени (обновляем при каждом открытии)
             try:
                 self._list_menu.entryconfigure(self._sleep_menu_index,
-                                               label="😴  " + self._sleep_remaining_label())
+                                               label=self._sleep_remaining_label())
             except Exception:
                 pass
             b = self.btn_listmenu
