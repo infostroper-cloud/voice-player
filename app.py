@@ -14,6 +14,7 @@ from __future__ import annotations
 import ctypes
 import json
 import os
+os.environ["TK_SILENCE_DEPRECATION"] = "1"
 import queue
 import random
 import re
@@ -3307,6 +3308,18 @@ class VoicePlayerApp:
         self._apply_styles(c)
         self._apply_window_titlebar_theme(self.root, c)
         self.root.after(120, lambda: self._apply_window_titlebar_theme(self.root, self.colors))
+        if IS_MAC:
+            try:
+                self.root.lift()
+                self.root.attributes("-topmost", True)
+                self.root.after(300, lambda: self.root.attributes("-topmost", False))
+                self.root.focus_force()
+                subprocess.Popen([
+                    "/usr/bin/osascript", "-e",
+                    'tell application "System Events" to set frontmost of first process whose unix id is ' + str(os.getpid()) + ' to true'
+                ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            except Exception:
+                pass
         bg, panel, panel2, ink, mute, signal, err_col, hairline, sel, active = (
             c["bg"], c["panel"], c["panel2"], c["ink"], c["mute"], c["signal"],
             c["err"], c["hairline"], c["sel"], c["active"])

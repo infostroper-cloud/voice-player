@@ -3,6 +3,7 @@
 # VoicePlayer 1-Click Double-Clickable Installer for macOS
 # ==============================================================================
 set -e
+export TK_SILENCE_DEPRECATION=1
 clear
 
 echo "=========================================================="

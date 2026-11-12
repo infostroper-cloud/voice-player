@@ -207,6 +207,7 @@ if [ "$PLATFORM" = "macOS" ]; then
     MAC_LAUNCHER="$MAC_APP_DIR/VoicePlayer.command"
     cat << EOF > "$MAC_LAUNCHER"
 #!/usr/bin/env bash
+export TK_SILENCE_DEPRECATION=1
 cd "$TARGET_DIR"
 exec "$PY_BIN" "$TARGET_DIR/app.py" "\$@"
 EOF
@@ -227,7 +228,10 @@ pkill -f "voice-player/versions" 2>/dev/null || true
 # Start in GUI session
 if [ "$PLATFORM" = "macOS" ]; then
     echo "Launching VoicePlayer window on macOS..."
-    open "$MAC_LAUNCHER"
+    export TK_SILENCE_DEPRECATION=1
+    nohup "$PY_BIN" "$TARGET_DIR/app.py" >> "$INSTALL_DIR/crash.log" 2>&1 &
+    sleep 1
+    osascript -e 'tell application "System Events" to set frontmost of first process whose name contains "python" to true' 2>/dev/null || true
 elif [ -n "$DISPLAY" ]; then
     echo "Launching VoicePlayer in background..."
     nohup "$LOCAL_LAUNCHER" >> "$INSTALL_DIR/crash.log" 2>&1 &
