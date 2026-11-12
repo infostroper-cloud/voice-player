@@ -19,9 +19,13 @@
 
 ---
 
-## 🌐 Language / 语言 / 言語 / Idioma / Sprache / Langue / भाषा / Язык
+## 🌐 Documentation / 文档 / ドキュメント / Документация
 
-* 🇬🇧 [English (Default)](https://infostroper-cloud.github.io/voice-player/index-en.html)
+[English (Default)](README.md) · [Русский](README.ru.md) · [Español](README.es.md) · [中文](README.zh.md) · [日本語](README.ja.md)
+
+### 🌍 Web Landing Pages
+
+* 🇬🇧 [English Web](https://infostroper-cloud.github.io/voice-player/index-en.html)
 * 🇨🇳 [中文 (Chinese Simplified)](https://infostroper-cloud.github.io/voice-player/index-zh.html)
 * 🇯🇵 [日本語 (Japanese)](https://infostroper-cloud.github.io/voice-player/index-ja.html)
 * 🇪🇸 [Español (Spanish)](https://infostroper-cloud.github.io/voice-player/index-es.html)
@@ -53,7 +57,7 @@
 ### 🍎 macOS & 🐧 Linux
 Run this one-liner in your terminal:
 ```bash
-curl -fsSL https://raw.githubusercontent.com/infostroper-cloud/voice-player/main/packaging/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/infostroper-cloud/voice-player/main/install.sh | bash
 ```
 
 ---
