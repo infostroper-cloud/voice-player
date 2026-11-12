@@ -213,6 +213,9 @@ STRINGS: Dict[str, Dict[str, str]] = {
         "accent_violet": "Violet",
         "shortcuts_title": "Keyboard Shortcuts",
         "shortcuts_help": "Keyboard Shortcuts Help (F1)",
+        "author": "Author",
+        "date": "Date",
+        "filter_all": "all",
     },
     "ru": {
         "app_title": "VoicePlayer — Озвучка ИИ и голосовой ввод",
@@ -389,6 +392,9 @@ STRINGS: Dict[str, Dict[str, str]] = {
         "accent_violet": "Фиолетовый",
         "shortcuts_title": "Горячие клавиши",
         "shortcuts_help": "Справка по горячим клавишам (F1)",
+        "author": "Автор",
+        "date": "Дата",
+        "filter_all": "все",
     },
     "es": {
         "app_title": "VoicePlayer — Reproductor de Voz IA",
@@ -565,6 +571,9 @@ STRINGS: Dict[str, Dict[str, str]] = {
         "accent_violet": "Violeta",
         "shortcuts_title": "Atajos de teclado",
         "shortcuts_help": "Ayuda de atajos (F1)",
+        "author": "Autor",
+        "date": "Fecha",
+        "filter_all": "todos",
     },
     "zh": {
         "app_title": "VoicePlayer — AI语音播报播放器",
@@ -741,6 +750,9 @@ STRINGS: Dict[str, Dict[str, str]] = {
         "accent_violet": "紫色",
         "shortcuts_title": "快捷键列表",
         "shortcuts_help": "快捷键帮助 (F1)",
+        "author": "作者",
+        "date": "日期",
+        "filter_all": "全部",
     },
     "hi": {
         "app_title": "VoicePlayer — AI आवाज़ और टीटीएस प्लेयर",
@@ -917,6 +929,9 @@ STRINGS: Dict[str, Dict[str, str]] = {
         "accent_violet": "बैंगनी",
         "shortcuts_title": "कीबोर्ड शॉर्टकट",
         "shortcuts_help": "शॉर्टकट सहायता (F1)",
+        "author": "लेखक",
+        "date": "दिनांक",
+        "filter_all": "सभी",
     },
     "ja": {
         "app_title": "VoicePlayer — AI音声読み上げプレーヤー",
@@ -1093,6 +1108,9 @@ STRINGS: Dict[str, Dict[str, str]] = {
         "accent_violet": "紫",
         "shortcuts_title": "キーボードショートカット",
         "shortcuts_help": "ショートカットヘルプ (F1)",
+        "author": "作成者",
+        "date": "日付",
+        "filter_all": "すべて",
     },
     "de": {
         "app_title": "VoicePlayer — KI-Sprachausgabe & TTS Player",
@@ -1269,6 +1287,9 @@ STRINGS: Dict[str, Dict[str, str]] = {
         "accent_violet": "Violett",
         "shortcuts_title": "Tastaturkürzel",
         "shortcuts_help": "Tastaturkürzel-Hilfe (F1)",
+        "author": "Autor",
+        "date": "Datum",
+        "filter_all": "alle",
     },
     "fr": {
         "app_title": "VoicePlayer — Lecteur Vocal IA & Synthèse Vocale",
@@ -1445,11 +1466,34 @@ STRINGS: Dict[str, Dict[str, str]] = {
         "accent_violet": "Violet",
         "shortcuts_title": "Raccourcis clavier",
         "shortcuts_help": "Aide raccourcis (F1)",
+        "author": "Auteur",
+        "date": "Date",
+        "filter_all": "tous",
     },
 }
 
 # Словарь локализации для всплывающих подсказок (tooltips)
 TOOLTIP_MAP: Dict[str, Dict[str, str]] = {
+    "Прослушать выбранный голос": {
+        "en": "Preview selected voice",
+        "ru": "Прослушать выбранный голос",
+        "es": "Escuchar voz seleccionada",
+        "zh": "试听所选语音",
+        "hi": "चयनित आवाज़ सुनें",
+        "ja": "選択した音声をプレビュー",
+        "de": "Ausgewählte Stimme anhören",
+        "fr": "Écouter la voix sélectionnée",
+    },
+    "Избранные и закреплённые реплики": {
+        "en": "Favorite and pinned replies",
+        "ru": "Избранные и закреплённые реплики",
+        "es": "Mensajes favoritos y fijados",
+        "zh": "收藏与置顶回复",
+        "hi": "पसंदीदा और पिन किए गए संदेश",
+        "ja": "お気に入りと固定された返信",
+        "de": "Favorisierte und angeheftete Antworten",
+        "fr": "Réponses favorites et épinglées",
+    },
     "Ссылка (URL) в поле → озвучить статью": {
         "en": "Link (URL) in field → speak article",
         "ru": "Ссылка (URL) в поле → озвучить статью",

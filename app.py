@@ -2553,18 +2553,18 @@ class VoicePlayerApp:
             self.root.iconphoto(True, *self._app_icon_imgs)
         except Exception:
             pass
-        if ICON_PATH.exists():
-            try:
-                self.root.iconbitmap(default=str(ICON_PATH))
-            except Exception:
-                pass
-        # Иконка на панели задач/в заголовке + правильное закрепление на панели задач
-        # (иначе Windows показывает пустой квадрат или иконку Python, а закреплённый
-        # ярлык запускает голый pythonw.exe, который ничего не открывает).
-        self.root.after(150, self._apply_win_taskbar_identity)
-        self.root.after(1500, self._apply_win_taskbar_identity)
+        if IS_WIN:
+            if ICON_PATH.exists():
+                try:
+                    self.root.iconbitmap(default=str(ICON_PATH))
+                except Exception:
+                    pass
+            self.root.after(150, self._apply_win_taskbar_identity)
+            self.root.after(1500, self._apply_win_taskbar_identity)
 
     def _top_hwnd(self, win=None):
+        if not IS_WIN:
+            return 0
         win = win or self.root
         win.update_idletasks()
         u32 = ctypes.windll.user32
@@ -2754,12 +2754,30 @@ class VoicePlayerApp:
             if hasattr(self, "lbl_mode_title"):
                 self.lbl_mode_title.configure(text=vp_i18n.t("mode") + ":")
             if hasattr(self, "cmb_mode"):
-                self.cmb_mode["values"] = [
+                cur_mode_idx = self.cmb_mode.current()
+                m_vals = [
                     vp_i18n.t("mode_queue"),
                     vp_i18n.t("mode_repeat_one"),
                     vp_i18n.t("mode_repeat_all"),
                     vp_i18n.t("mode_shuffle"),
                 ]
+                self.cmb_mode["values"] = m_vals
+                if 0 <= cur_mode_idx < len(m_vals):
+                    self.var_mode.set(m_vals[cur_mode_idx])
+                else:
+                    self.var_mode.set(m_vals[0])
+
+            # Фильтры автора, даты и сброса
+            if hasattr(self, "lbl_filt_author"):
+                self.lbl_filt_author.configure(text=vp_i18n.t("author") + ":")
+            if hasattr(self, "lbl_filt_date"):
+                self.lbl_filt_date.configure(text=vp_i18n.t("date") + ":")
+            if hasattr(self, "btn_filt_reset"):
+                self.btn_filt_reset.configure(text=vp_i18n.t("reset"))
+            if hasattr(self, "var_filter_author") and self.var_filter_author.get() in ("все", "all", "todos", "全部", "すべて"):
+                self.var_filter_author.set(vp_i18n.t("filter_all"))
+            if hasattr(self, "var_filter_date") and self.var_filter_date.get() in ("все", "all", "todos", "全部", "すべて"):
+                self.var_filter_date.set(vp_i18n.t("filter_all"))
 
             # Пересоздать контекстное меню и меню списка с локализованными пунктами
             try:
@@ -3344,7 +3362,7 @@ class VoicePlayerApp:
             ("board",    "Доска",     "Сообщения командной доски"),
             ("favorite", "★",         "Избранные и закреплённые реплики"),
         ):
-            b = ttk.Button(pills_bar, text=pill_lbl, width=max(3, len(pill_lbl) + 1),
+            b = ttk.Button(pills_bar, text=pill_lbl,
                            style="Toggle.TButton", command=lambda k=src_key: self._set_source_pill(k))
             b.pack(side="left", padx=(0, 4))
             self._tt(b, tip_txt)
@@ -3364,18 +3382,21 @@ class VoicePlayerApp:
         sub_bars.columnconfigure(0, weight=1)
 
         self.filt_frame = filt = ttk.Frame(sub_bars)
-        ttk.Label(filt, text="Автор:", style="Dim.TLabel").pack(side="left")
+        self.lbl_filt_author = ttk.Label(filt, text=vp_i18n.t("author") + ":", style="Dim.TLabel")
+        self.lbl_filt_author.pack(side="left")
         self.cmb_author = ttk.Combobox(filt, textvariable=self.var_filter_author,
-                                       state="readonly", width=13, values=["все"])
+                                       state="readonly", width=13, values=[vp_i18n.t("filter_all")])
         self.cmb_author.pack(side="left", padx=(4, 8))
         self.cmb_author.bind("<<ComboboxSelected>>", lambda e: self._render_list())
-        ttk.Label(filt, text="Дата:", style="Dim.TLabel").pack(side="left")
+        self.lbl_filt_date = ttk.Label(filt, text=vp_i18n.t("date") + ":", style="Dim.TLabel")
+        self.lbl_filt_date.pack(side="left")
         self.cmb_date = ttk.Combobox(filt, textvariable=self.var_filter_date,
-                                     state="readonly", width=10, values=["все"])
+                                     state="readonly", width=10, values=[vp_i18n.t("filter_all")])
         self.cmb_date.pack(side="left", padx=(4, 8))
         self.cmb_date.bind("<<ComboboxSelected>>", lambda e: self._render_list())
-        ttk.Button(filt, text="Сброс", width=6, command=self._reset_filters,
-                   style="Toggle.TButton").pack(side="left")
+        self.btn_filt_reset = ttk.Button(filt, text=vp_i18n.t("reset"), width=6, command=self._reset_filters,
+                                         style="Toggle.TButton")
+        self.btn_filt_reset.pack(side="left")
 
         self.search_frame = ttk.Frame(sub_bars)
         self.search_entry = ttk.Entry(self.search_frame, textvariable=self.var_search)
@@ -3425,7 +3446,7 @@ class VoicePlayerApp:
         in_head.grid(row=0, column=0, sticky="ew", pady=(0, 4))
         self.lbl_custom_text = ttk.Label(in_head, text=vp_i18n.t("custom_text_title"), style="Dim.TLabel")
         self.lbl_custom_text.pack(side="left")
-        self._icon_button(in_head, "broom", lambda: self.tts_input.delete("1.0", "end"),
+        self._icon_button(in_head, "broom", lambda: (self.tts_input.delete("1.0", "end"), self.tts_input.configure(height=3)),
                           "Очистить поле", width=2).pack(side="right")
         self.btn_paste_input = ttk.Button(in_head, text="📋 " + vp_i18n.t("paste"), style="Toggle.TButton",
                                          command=self._paste_into_input)
@@ -3648,7 +3669,7 @@ class VoicePlayerApp:
         self.root.bind("<Control-comma>", lambda e: self._open_settings())
         self.root.bind("<Control-m>", lambda e: self._toggle_dnd_quick())
         self.root.bind("<Control-t>", lambda e: self._toggle_tools())
-        self.root.bind("<Control-l>", lambda e: self.tts_input.delete("1.0", "end") if hasattr(self, "tts_input") else None)
+        self.root.bind("<Control-l>", lambda e: (self.tts_input.delete("1.0", "end"), self.tts_input.configure(height=3)) if hasattr(self, "tts_input") else None)
         self.root.bind("<Control-i>", lambda e: self.tts_input.focus_set() if hasattr(self, "tts_input") else None)
         self.root.bind("<Control-d>", lambda e: self._toggle_dictate())
         self.root.bind("<Control-e>", lambda e: self._toggle_edit_text())
@@ -6054,11 +6075,14 @@ class VoicePlayerApp:
         return (not it.deleted and it.author not in self._muted and self._source_allows(it))
 
     def _auto_next_index(self) -> int:
+        cur_mode_idx = getattr(self, "cmb_mode", None) and self.cmb_mode.current()
         mode = self.var_mode.get()
-        if mode == "Повтор одной" and 0 <= self.current_idx < len(self.queue_items):
+        is_repeat_one = (cur_mode_idx == 1) or (mode == vp_i18n.t("mode_repeat_one")) or (mode == "Повтор одной")
+        is_shuffle = (cur_mode_idx == 3) or (mode == vp_i18n.t("mode_shuffle")) or (mode == "Перемешать")
+        if is_repeat_one and 0 <= self.current_idx < len(self.queue_items):
             self.queue_items[self.current_idx].played = False
             return self.current_idx
-        if mode == "Перемешать":
+        if is_shuffle:
             cands = [i for i in range(len(self.queue_items))
                      if self._playable(i) and not self.queue_items[i].played and i != self.current_idx]
             if not cands:                      # все сыграны — начать круг заново
@@ -7512,6 +7536,7 @@ class VoicePlayerApp:
         self._speak_now(item, "текст")
         try:
             self.tts_input.delete("1.0", "end")
+            self.tts_input.configure(height=3)
         except Exception:
             pass
 
@@ -7780,6 +7805,91 @@ class VoicePlayerApp:
             if not self.stop_event.is_set():
                 self.root.after(300, self._tick)
 
+
+
+    def _delete_current_or_selected(self):
+        """Удалить текущую или выбранную реплику из очереди."""
+        try:
+            sel = self.tree.selection()
+            if sel:
+                idx = int(sel[0])
+                if 0 <= idx < len(self.queue_items):
+                    del self.queue_items[idx]
+                    self._render_list()
+                    self._set_status("реплика удалена", ok=True)
+                    return
+            if self.current_idx is not None and 0 <= self.current_idx < len(self.queue_items):
+                del self.queue_items[self.current_idx]
+                if self.current_idx >= len(self.queue_items):
+                    self.current_idx = max(0, len(self.queue_items) - 1)
+                self._render_list()
+                self._set_status("текущая реплика удалена", ok=True)
+        except Exception as e:
+            log_line(f"delete_item error: {e}")
+
+    def _show_shortcuts_dialog(self):
+        """Красивое всплывающее окно со всеми горячими клавишами VoicePlayer."""
+        c = self.colors
+        w = tk.Toplevel(self.root)
+        w.title(vp_i18n.t("shortcuts_title"))
+        w.configure(bg=c["bg"])
+        self._center_over_root(w, 560, 520)
+        w.transient(self.root)
+
+        box = ttk.Frame(w, padding=18)
+        box.pack(fill="both", expand=True)
+
+        ttk.Label(box, text="⌨ " + vp_i18n.t("shortcuts_title"), font=("Segoe UI Semibold", 13)).pack(anchor="w", pady=(0, 10))
+
+        # Список горячих клавиш: (Категория, Комбинация, Действие)
+        shortcuts = [
+            ("Воспроизведение", "Space", "Пауза / Продолжить"),
+            ("Воспроизведение", "Ctrl + Enter", "Озвучить текст из поля ввода"),
+            ("Воспроизведение", "→  /  ←", "Следующая / Предыдущая реплика"),
+            ("Воспроизведение", "Ctrl + →  /  ←", "Перемотка на ±10 сек"),
+            ("Воспроизведение", "Shift + →  /  ←", "Переход к след. / пред. предложению"),
+            ("Воспроизведение", "R", "Повторить текущую реплику"),
+            ("Воспроизведение", "Ctrl + 1 / 2 / 3 / 4", "Скорость (1.0x / 1.25x / 1.5x / 2.0x)"),
+            ("Управление", "F1  /  Ctrl + H", "Справка по горячим клавишам"),
+            ("Управление", "Ctrl + , (запятая)", "Настройки программы"),
+            ("Управление", "Ctrl + M", "Режим «Не беспокоить» (тишина)"),
+            ("Управление", "Ctrl + T", "Панель инструментов (свернуть/развернуть)"),
+            ("Управление", "Ctrl + L", "Очистить поле своего текста"),
+            ("Управление", "Ctrl + I", "Фокус в поле ввода текста"),
+            ("Управление", "Ctrl + D", "Голосовая диктовка микрофоном"),
+            ("Управление", "Ctrl + E", "Редактировать текст реплики"),
+            ("Управление", "Ctrl + S", "Сохранить текущую озвучку в MP3"),
+            ("Очередь", "Ctrl + Del", "Удалить выбранную реплику"),
+            ("Очередь", "Ctrl + Shift + L", "Очистить всю очередь"),
+            ("Очередь", "Ctrl + F", "Поиск и фильтр по тексту"),
+            ("Очередь", "F5", "Подтянуть свежие диалоги ИИ"),
+            ("Очередь", "Esc", "Снять выделение / Закрыть поиск"),
+        ]
+
+        canvas = tk.Canvas(box, bg=c["panel"], highlightthickness=0)
+        sb = ttk.Scrollbar(box, orient="vertical", command=canvas.yview)
+        inner = ttk.Frame(canvas, style="Panel.TFrame", padding=10)
+        inner.columnconfigure(0, minsize=140)
+        inner.columnconfigure(1, weight=1)
+
+        canvas.create_window((0, 0), window=inner, anchor="nw")
+        canvas.configure(xscrollcommand=sb.set, yscrollcommand=sb.set)
+        canvas.pack(side="left", fill="both", expand=True)
+        sb.pack(side="right", fill="y")
+
+        def _on_cfg(e):
+            canvas.configure(scrollregion=canvas.bbox("all"))
+        inner.bind("<Configure>", _on_cfg)
+
+        for row_i, (cat, key_combo, desc) in enumerate(shortcuts):
+            k_lbl = tk.Label(inner, text=key_combo, font=("Segoe UI Semibold", 9), bg=c["panel2"], fg=c["signal"],
+                             padx=8, pady=3, relief="flat", bd=0)
+            k_lbl.grid(row=row_i, column=0, sticky="w", padx=(0, 10), pady=3)
+            d_lbl = ttk.Label(inner, text=f"({cat})  {desc}", style="TLabel")
+            d_lbl.grid(row=row_i, column=1, sticky="w", pady=3)
+
+        ttk.Button(w, text=vp_i18n.t("close"), style="Primary.TButton", command=w.destroy).pack(pady=10)
+
     def on_close(self):
         global _instance_mutex
         vp_updater.mark_healthy(APP_DIR)   # штатный выход: версия рабочая, даже если окно открывали ненадолго
@@ -7952,88 +8062,6 @@ def main():
         os._exit(0)
 
 
+
 if __name__ == "__main__":
     main()
-
-    def _delete_current_or_selected(self):
-        """Удалить текущую или выбранную реплику из очереди."""
-        try:
-            sel = self.tree.selection()
-            if sel:
-                idx = int(sel[0])
-                if 0 <= idx < len(self.queue_items):
-                    del self.queue_items[idx]
-                    self._render_list()
-                    self._set_status("реплика удалена", ok=True)
-                    return
-            if self.current_idx is not None and 0 <= self.current_idx < len(self.queue_items):
-                del self.queue_items[self.current_idx]
-                if self.current_idx >= len(self.queue_items):
-                    self.current_idx = max(0, len(self.queue_items) - 1)
-                self._render_list()
-                self._set_status("текущая реплика удалена", ok=True)
-        except Exception as e:
-            log_line(f"delete_item error: {e}")
-
-    def _show_shortcuts_dialog(self):
-        """Красивое всплывающее окно со всеми горячими клавишами VoicePlayer."""
-        c = self.colors
-        w = tk.Toplevel(self.root)
-        w.title(vp_i18n.t("shortcuts_title"))
-        w.configure(bg=c["bg"])
-        self._center_over_root(w, 560, 520)
-        w.transient(self.root)
-
-        box = ttk.Frame(w, padding=18)
-        box.pack(fill="both", expand=True)
-
-        ttk.Label(box, text="⌨ " + vp_i18n.t("shortcuts_title"), font=("Segoe UI Semibold", 13)).pack(anchor="w", pady=(0, 10))
-
-        # Список горячих клавиш: (Категория, Комбинация, Действие)
-        shortcuts = [
-            ("Воспроизведение", "Space", "Пауза / Продолжить"),
-            ("Воспроизведение", "Ctrl + Enter", "Озвучить текст из поля ввода"),
-            ("Воспроизведение", "→  /  ←", "Следующая / Предыдущая реплика"),
-            ("Воспроизведение", "Ctrl + →  /  ←", "Перемотка на ±10 сек"),
-            ("Воспроизведение", "Shift + →  /  ←", "Переход к след. / пред. предложению"),
-            ("Воспроизведение", "R", "Повторить текущую реплику"),
-            ("Воспроизведение", "Ctrl + 1 / 2 / 3 / 4", "Скорость (1.0x / 1.25x / 1.5x / 2.0x)"),
-            ("Управление", "F1  /  Ctrl + H", "Справка по горячим клавишам"),
-            ("Управление", "Ctrl + , (запятая)", "Настройки программы"),
-            ("Управление", "Ctrl + M", "Режим «Не беспокоить» (тишина)"),
-            ("Управление", "Ctrl + T", "Панель инструментов (свернуть/развернуть)"),
-            ("Управление", "Ctrl + L", "Очистить поле своего текста"),
-            ("Управление", "Ctrl + I", "Фокус в поле ввода текста"),
-            ("Управление", "Ctrl + D", "Голосовая диктовка микрофоном"),
-            ("Управление", "Ctrl + E", "Редактировать текст реплики"),
-            ("Управление", "Ctrl + S", "Сохранить текущую озвучку в MP3"),
-            ("Очередь", "Ctrl + Del", "Удалить выбранную реплику"),
-            ("Очередь", "Ctrl + Shift + L", "Очистить всю очередь"),
-            ("Очередь", "Ctrl + F", "Поиск и фильтр по тексту"),
-            ("Очередь", "F5", "Подтянуть свежие диалоги ИИ"),
-            ("Очередь", "Esc", "Снять выделение / Закрыть поиск"),
-        ]
-
-        canvas = tk.Canvas(box, bg=c["panel"], highlightthickness=0)
-        sb = ttk.Scrollbar(box, orient="vertical", command=canvas.yview)
-        inner = ttk.Frame(canvas, style="Panel.TFrame", padding=10)
-        inner.columnconfigure(0, minsize=140)
-        inner.columnconfigure(1, weight=1)
-
-        canvas.create_window((0, 0), window=inner, anchor="nw")
-        canvas.configure(xscrollcommand=sb.set, yscrollcommand=sb.set)
-        canvas.pack(side="left", fill="both", expand=True)
-        sb.pack(side="right", fill="y")
-
-        def _on_cfg(e):
-            canvas.configure(scrollregion=canvas.bbox("all"))
-        inner.bind("<Configure>", _on_cfg)
-
-        for row_i, (cat, key_combo, desc) in enumerate(shortcuts):
-            k_lbl = tk.Label(inner, text=key_combo, font=("Segoe UI Semibold", 9), bg=c["panel2"], fg=c["signal"],
-                             padx=8, pady=3, relief="flat", bd=0)
-            k_lbl.grid(row=row_i, column=0, sticky="w", padx=(0, 10), pady=3)
-            d_lbl = ttk.Label(inner, text=f"({cat})  {desc}", style="TLabel")
-            d_lbl.grid(row=row_i, column=1, sticky="w", pady=3)
-
-        ttk.Button(w, text=vp_i18n.t("close"), style="Primary.TButton", command=w.destroy).pack(pady=10)

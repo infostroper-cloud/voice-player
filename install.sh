@@ -41,15 +41,16 @@ fi
 PY_VER=$($PY_BIN -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
 echo "Using Python: $PY_BIN (version $PY_VER)"
 
-# Check tkinter
-if ! $PY_BIN -c "import tkinter" >/dev/null 2>&1; then
-    echo "⚠️ Warning: Tkinter GUI module not found for $PY_BIN."
+# Test Tkinter GUI capability
+if ! $PY_BIN -c "import tkinter as tk; r = tk.Tk(); r.withdraw(); r.destroy()" >/dev/null 2>&1; then
+    echo "⚠️ Warning: Tkinter GUI could not initialize on current Python ($PY_BIN)."
     if [ "$PLATFORM" = "macOS" ]; then
-        echo "  👉 On macOS with Homebrew: run 'brew install python-tk' or download Python from python.org"
+        echo "  👉 On macOS: please install official Python 3.12 from https://www.python.org"
+        echo "     or install Homebrew python-tk: 'brew install python-tk'"
     else
-        echo "  👉 On Ubuntu/Debian: run 'sudo apt update && sudo apt install python3-tk libportaudio2'"
-        echo "  👉 On Fedora/RHEL: run 'sudo dnf install python3-tkinter portaudio'"
-        echo "  👉 On Arch Linux: run 'sudo pacman -S tk portaudio'"
+        echo "  👉 On Ubuntu/Debian: run 'sudo apt update && sudo apt install -y python3-tk libportaudio2'"
+        echo "  👉 On Fedora/RHEL: run 'sudo dnf install -y python3-tkinter portaudio'"
+        echo "  👉 On Arch Linux: run 'sudo pacman -S --noconfirm tk portaudio'"
     fi
 fi
 
@@ -195,5 +196,5 @@ echo "=========================================================="
 
 # Start in background if GUI session is active
 if [ -n "$DISPLAY" ] || [ "$PLATFORM" = "macOS" ]; then
-    nohup "$LOCAL_LAUNCHER" >/dev/null 2>&1 &
+    nohup "$LOCAL_LAUNCHER" >> "$INSTALL_DIR/crash.log" 2>&1 &
 fi
