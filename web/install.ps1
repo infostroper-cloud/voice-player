@@ -18,21 +18,33 @@ Write-Host ""
 
 # 1. Поиск рабочего Python >= 3.10
 function Find-Python {
-    foreach ($cmd in @("python.exe", "python3.exe")) {
+    foreach ($cmd in @("python.exe", "python3.exe", "py.exe")) {
         try {
-            $p = (Get-Command $cmd -ErrorAction SilentlyContinue).Source
-            if ($p -and $p -notlike "*WindowsApps*") {
-                $ver = & $p -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>$null
-                if ($ver -and [float]$ver -ge 3.10) { return $p }
+            $cmds = @(Get-Command $cmd -ErrorAction SilentlyContinue)
+            foreach ($c in $cmds) {
+                $p = $c.Source
+                if ($p -and $p -notlike "*WindowsApps*" -and (Test-Path $p)) {
+                    $ver = & $p -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>$null
+                    if ($ver -and [float]$ver -ge 3.10) { return $p }
+                }
             }
         } catch {}
     }
-    foreach ($base in @((Join-Path $env:LOCALAPPDATA "Programs\Python"), (Join-Path $env:LOCALAPPDATA "Python"))) {
+    $searchDirs = @(
+        (Join-Path $env:LOCALAPPDATA "Programs\Python"),
+        (Join-Path $env:LOCALAPPDATA "Python"),
+        (Join-Path $env:ProgramFiles "Python*")
+    )
+    foreach ($base in $searchDirs) {
         if (Test-Path $base) {
-            Get-ChildItem -Path $base -Filter "python.exe" -Recurse -ErrorAction SilentlyContinue | ForEach-Object {
+            $pyFiles = @(Get-ChildItem -Path $base -Filter "python.exe" -Recurse -ErrorAction SilentlyContinue)
+            foreach ($f in $pyFiles) {
                 try {
-                    $ver = & $_.FullName -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>$null
-                    if ($ver -and [float]$ver -ge 3.10) { return $_.FullName }
+                    $p = $f.FullName
+                    if ($p -notlike "*Scripts*" -and (Test-Path $p)) {
+                        $ver = & $p -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>$null
+                        if ($ver -and [float]$ver -ge 3.10) { return $p }
+                    }
                 } catch {}
             }
         }
@@ -42,6 +54,9 @@ function Find-Python {
 
 Write-Host "[1/5] Проверка среды Python..." -ForegroundColor Cyan
 $PythonExe = Find-Python
+if ($PythonExe -is [array]) {
+    $PythonExe = $PythonExe[0]
+}
 
 if (-not $PythonExe) {
     Write-Host "      Python 3.10+ не найден. Загружаю официальный Python 3.12..." -ForegroundColor Yellow
@@ -53,6 +68,9 @@ if (-not $PythonExe) {
     Start-Process -FilePath $TempPy -ArgumentList "/quiet InstallAllUsers=0 PrependPath=1 Include_test=0 Include_tcltk=1" -Wait
     Remove-Item $TempPy -Force -ErrorAction SilentlyContinue
     $PythonExe = Find-Python
+    if ($PythonExe -is [array]) {
+        $PythonExe = $PythonExe[0]
+    }
 }
 
 if (-not $PythonExe) {
@@ -91,7 +109,7 @@ Expand-Archive -Path $TempZip -DestinationPath $TempExtract -Force
 Get-ChildItem -Path $TempExtract -Recurse | Unblock-File -ErrorAction SilentlyContinue
 
 $Updater = Join-Path $TempExtract "vp_updater.py"
-& $PythonExe $Updater --install $TempZip --dest $InstallDir
+& "$PythonExe" "$Updater" --install "$TempZip" --dest "$InstallDir"
 
 Remove-Item $TempZip -Force -ErrorAction SilentlyContinue
 Remove-Item $TempExtract -Recurse -Force -ErrorAction SilentlyContinue
