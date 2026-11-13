@@ -523,7 +523,7 @@ def register_windows_uninstaller(version: str = "") -> None:
             winreg.SetValueEx(k, "DisplayName", 0, winreg.REG_SZ, "VoicePlayer")
             winreg.SetValueEx(k, "DisplayVersion", 0, winreg.REG_SZ, v)
             winreg.SetValueEx(k, "Publisher", 0, winreg.REG_SZ, "VoicePlayer Team")
-            winreg.SetValueEx(k, "DisplayIcon", 0, winreg.REG_SZ, f'"{ico}",0' if ico.is_file() else str(ico))
+            winreg.SetValueEx(k, "DisplayIcon", 0, winreg.REG_SZ, str(ico))
             winreg.SetValueEx(k, "InstallLocation", 0, winreg.REG_SZ, str(h))
             winreg.SetValueEx(k, "InstallDate", 0, winreg.REG_SZ, time.strftime("%Y%m%d"))
             winreg.SetValueEx(k, "UninstallString", 0, winreg.REG_SZ, uninst_cmd)

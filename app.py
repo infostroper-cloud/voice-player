@@ -55,10 +55,11 @@ IS_WIN = (os.name == "nt")
 IS_MAC = (sys.platform == "darwin")
 
 if IS_WIN:
-    try:
-        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(APP_USER_MODEL_ID)
-    except Exception:
-        pass
+    if getattr(sys, "frozen", False):
+        try:
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(APP_USER_MODEL_ID)
+        except Exception:
+            pass
     _winmm = ctypes.WinDLL("winmm")
     _winmm.mciSendStringW.argtypes = [ctypes.c_wchar_p, ctypes.c_wchar_p, ctypes.c_uint, ctypes.c_void_p]
     _winmm.mciSendStringW.restype = ctypes.c_uint
@@ -2703,6 +2704,16 @@ class VoicePlayerApp:
         return im.resize((size, size), Image.LANCZOS)
 
     def _apply_modern_icon(self):
+        if IS_WIN:
+            if ICON_PATH.exists():
+                try:
+                    self.root.iconbitmap(default=str(ICON_PATH))
+                except Exception:
+                    pass
+            self.root.after(100, self._apply_win_taskbar_identity)
+            self.root.after(1000, self._apply_win_taskbar_identity)
+            return
+
         try:
             from PIL import ImageTk
             self._app_icon_imgs = [
@@ -2713,14 +2724,6 @@ class VoicePlayerApp:
             self.root.iconphoto(True, *self._app_icon_imgs)
         except Exception:
             pass
-        if IS_WIN:
-            if ICON_PATH.exists():
-                try:
-                    self.root.iconbitmap(default=str(ICON_PATH))
-                except Exception:
-                    pass
-            self.root.after(150, self._apply_win_taskbar_identity)
-            self.root.after(1500, self._apply_win_taskbar_identity)
 
     def _top_hwnd(self, win=None):
         if not IS_WIN:
@@ -2746,7 +2749,8 @@ class VoicePlayerApp:
         except Exception:
             return
         stable_ico = Path.home() / ".voice-player" / "icon.ico"
-        ico = stable_ico if stable_ico.exists() else ICON_PATH
+        parent_ico = Path(APP_DIR).parent / "icon.ico"
+        ico = ICON_PATH if ICON_PATH.exists() else (parent_ico if parent_ico.exists() else stable_ico)
         # ---- 1. Иконки окна ----
         try:
             if ico.exists():
