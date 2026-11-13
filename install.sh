@@ -82,65 +82,94 @@ fi
 
 INSTALL_DIR="$HOME/.voice-player"
 VERSIONS_DIR="$INSTALL_DIR/versions"
-TARGET_DIR="$VERSIONS_DIR/1.2.0"
-mkdir -p "$TARGET_DIR"
+mkdir -p "$VERSIONS_DIR"
 
-# Download VoicePlayer files
-echo "Downloading VoicePlayer v1.2.0 for $PLATFORM..."
-TMP_TAR="/tmp/voice-player-1.2.0.tar.gz"
-DOWNLOAD_URL="https://github.com/infostroper-cloud/voice-player/releases/latest/download/VoicePlayer-1.2.0-macos-linux.tar.gz"
-ZIP_URL="https://github.com/infostroper-cloud/voice-player/releases/latest/download/voice-player-1.2.0.zip"
-
-DOWNLOADED=0
-if command -v curl >/dev/null 2>&1; then
-    if curl -fsSL "$DOWNLOAD_URL" -o "$TMP_TAR"; then
-        DOWNLOADED=1
-    elif curl -fsSL "$ZIP_URL" -o "/tmp/vp.zip"; then
-        DOWNLOADED=2
+REQUESTED_VER="${1:-}"
+DETECTED_VER=""
+if [ -n "$REQUESTED_VER" ]; then
+    DETECTED_VER="$REQUESTED_VER"
+else
+    if command -v curl >/dev/null 2>&1; then
+        DETECTED_VER=$(curl -fsSL https://api.github.com/repos/infostroper-cloud/voice-player/releases/latest 2>/dev/null | grep -m 1 '"tag_name":' | sed -E 's/.*"tag_name":\s*"v?([^"]+)".*/\1/' || true)
     fi
-elif command -v wget >/dev/null 2>&1; then
-    if wget -qO "$TMP_TAR" "$DOWNLOAD_URL"; then
-        DOWNLOADED=1
-    elif wget -qO "/tmp/vp.zip" "$ZIP_URL"; then
-        DOWNLOADED=2
+    if [ -z "$DETECTED_VER" ]; then
+        DETECTED_VER="1.2.4"
     fi
 fi
 
-if [ "$DOWNLOADED" -eq 0 ]; then
+echo "Downloading VoicePlayer v$DETECTED_VER for $PLATFORM..."
+
+TMP_DIR="/tmp/vp-install-$$"
+mkdir -p "$TMP_DIR/extract"
+
+CANDIDATE_URLS=(
+    "https://github.com/infostroper-cloud/voice-player/releases/latest/download/VoicePlayer-${DETECTED_VER}-macos-linux.tar.gz"
+    "https://github.com/infostroper-cloud/voice-player/releases/latest/download/voice-player-${DETECTED_VER}.zip"
+    "https://github.com/infostroper-cloud/voice-player/releases/latest/download/voice-player.zip"
+    "https://github.com/infostroper-cloud/voice-player/archive/refs/tags/v${DETECTED_VER}.tar.gz"
+    "https://github.com/infostroper-cloud/voice-player/archive/refs/heads/main.zip"
+)
+
+DOWNLOADED_FILE=""
+for url in "${CANDIDATE_URLS[@]}"; do
+    tmp_dest="$TMP_DIR/download_pkg"
+    if command -v curl >/dev/null 2>&1; then
+        if curl -fsSL "$url" -o "$tmp_dest" 2>/dev/null && [ -s "$tmp_dest" ]; then
+            DOWNLOADED_FILE="$tmp_dest"
+            break
+        fi
+    elif command -v wget >/dev/null 2>&1; then
+        if wget -qO "$tmp_dest" "$url" 2>/dev/null && [ -s "$tmp_dest" ]; then
+            DOWNLOADED_FILE="$tmp_dest"
+            break
+        fi
+    fi
+done
+
+if [ -z "$DOWNLOADED_FILE" ]; then
     echo "❌ Error: Failed to download VoicePlayer package from GitHub Releases."
+    rm -rf "$TMP_DIR"
     exit 1
 fi
 
-mkdir -p /tmp/vp-extract
-if [ "$DOWNLOADED" -eq 1 ] && [ -f "$TMP_TAR" ]; then
-    tar -xzf "$TMP_TAR" -C /tmp/vp-extract
-    rm -f "$TMP_TAR"
-elif [ -f "/tmp/vp.zip" ]; then
-    $PY_BIN -m zipfile -e "/tmp/vp.zip" /tmp/vp-extract
-    rm -f "/tmp/vp.zip"
+# Extract package
+if tar -tzf "$DOWNLOADED_FILE" >/dev/null 2>&1; then
+    tar -xzf "$DOWNLOADED_FILE" -C "$TMP_DIR/extract"
+elif $PY_BIN -m zipfile -t "$DOWNLOADED_FILE" >/dev/null 2>&1; then
+    $PY_BIN -m zipfile -e "$DOWNLOADED_FILE" "$TMP_DIR/extract"
+else
+    echo "❌ Error: Downloaded file is neither a valid tar.gz nor zip."
+    rm -rf "$TMP_DIR"
+    exit 1
 fi
 
-# Locate app.py in extracted tree and copy to TARGET_DIR
-APP_FOUND=$(find /tmp/vp-extract -type f -name "app.py" | head -n 1)
-if [ -n "$APP_FOUND" ]; then
-    SRC_DIR="$(dirname "$APP_FOUND")"
-    cp -r "$SRC_DIR"/* "$TARGET_DIR/"
-else
-    # Check if a zip exists inside extracted files
-    NESTED_ZIP=$(find /tmp/vp-extract -type f -name "*.zip" | head -n 1)
+# Locate app.py in extracted tree
+APP_FOUND=$(find "$TMP_DIR/extract" -type f -name "app.py" | head -n 1)
+if [ -z "$APP_FOUND" ]; then
+    NESTED_ZIP=$(find "$TMP_DIR/extract" -type f -name "*.zip" | head -n 1)
     if [ -n "$NESTED_ZIP" ]; then
-        $PY_BIN -m zipfile -e "$NESTED_ZIP" "$TARGET_DIR"
-    else
-        cp -r /tmp/vp-extract/* "$TARGET_DIR/"
+        $PY_BIN -m zipfile -e "$NESTED_ZIP" "$TMP_DIR/extract_nested"
+        APP_FOUND=$(find "$TMP_DIR/extract_nested" -type f -name "app.py" | head -n 1)
     fi
 fi
-rm -rf /tmp/vp-extract
 
-# If target directory somehow has a nested zip, unpack it
-if [ -f "$TARGET_DIR/voice-player-1.2.0.zip" ]; then
-    $PY_BIN -m zipfile -e "$TARGET_DIR/voice-player-1.2.0.zip" "$TARGET_DIR"
-    rm -f "$TARGET_DIR/voice-player-1.2.0.zip"
+if [ -z "$APP_FOUND" ]; then
+    echo "❌ Error: app.py was not found after archive extraction."
+    rm -rf "$TMP_DIR"
+    exit 1
 fi
+
+SRC_DIR="$(dirname "$APP_FOUND")"
+
+if [ -f "$SRC_DIR/VERSION" ]; then
+    DETECTED_VER=$(tr -d ' \r\n' < "$SRC_DIR/VERSION")
+fi
+
+TARGET_DIR="$VERSIONS_DIR/$DETECTED_VER"
+rm -rf "$TARGET_DIR"
+mkdir -p "$TARGET_DIR"
+cp -r "$SRC_DIR"/* "$TARGET_DIR/"
+rm -rf "$TMP_DIR"
 
 # Verify app.py exists
 if [ ! -f "$TARGET_DIR/app.py" ]; then
@@ -157,7 +186,7 @@ fi
 # Create stable pointer
 mkdir -p "$INSTALL_DIR"
 cat << EOF > "$INSTALL_DIR/current-version.json"
-{"version": "1.2.0"}
+{"version": "$DETECTED_VER"}
 EOF
 
 # Install python dependencies in user mode
@@ -229,7 +258,7 @@ exec "$PY_BIN" "\$RUN_DIR/app.py" "\$@"
 EOF
     chmod +x "$MAC_APP/Contents/MacOS/VoicePlayer"
 
-    cat << 'EOF' > "$MAC_APP/Contents/Info.plist"
+    cat << EOF > "$MAC_APP/Contents/Info.plist"
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -241,9 +270,9 @@ EOF
     <key>CFBundleIdentifier</key>
     <string>com.voiceplayer.app</string>
     <key>CFBundleVersion</key>
-    <string>1.2.0</string>
+    <string>$DETECTED_VER</string>
     <key>CFBundleShortVersionString</key>
-    <string>1.2.0</string>
+    <string>$DETECTED_VER</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleExecutable</key>
@@ -287,10 +316,20 @@ EOF
     echo "✓ macOS Gatekeeper quarantine removed & ad-hoc signature applied"
 fi
 
+# Install uninstaller
+if [ -f "$TARGET_DIR/uninstall.sh" ]; then
+    cp "$TARGET_DIR/uninstall.sh" "$INSTALL_DIR/uninstall.sh"
+    chmod +x "$INSTALL_DIR/uninstall.sh"
+    ln -sf "$INSTALL_DIR/uninstall.sh" "$HOME/.local/bin/voiceplayer-uninstall" 2>/dev/null || \
+    cp "$INSTALL_DIR/uninstall.sh" "$HOME/.local/bin/voiceplayer-uninstall" 2>/dev/null || true
+    chmod +x "$HOME/.local/bin/voiceplayer-uninstall" 2>/dev/null || true
+fi
+
 echo "=========================================================="
-echo "🎉 VoicePlayer v1.2.0 installed successfully!"
+echo "🎉 VoicePlayer v$DETECTED_VER installed successfully!"
 echo "Run from Applications: VoicePlayer"
 echo "Or from terminal: ~/.local/bin/voiceplayer"
+echo "To uninstall: ~/.local/bin/voiceplayer-uninstall"
 echo "Or start now..."
 echo "=========================================================="
 

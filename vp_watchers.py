@@ -711,9 +711,13 @@ class OllamaWatcher:
     def _find_db(self) -> Optional[Path]:
         candidates = [
             self.home / "AppData" / "Local" / "Ollama" / "db.sqlite",
+            self.home / "Library" / "Application Support" / "Ollama" / "db.sqlite",
             self.home / ".ollama" / "db.sqlite",
+            self.home / ".local" / "share" / "ollama" / "db.sqlite",
             Path(os.environ.get("LOCALAPPDATA", "")) / "Ollama" / "db.sqlite",
             Path(os.environ.get("APPDATA", "")) / "Ollama" / "db.sqlite",
+            Path("/var/lib/ollama/db.sqlite"),
+            Path("/usr/share/ollama/.ollama/db.sqlite"),
         ]
         return next((p for p in candidates if p and p.is_file()), None)
 
@@ -848,7 +852,17 @@ class DeepSeekWatcher:
     def __init__(self, home: Optional[Path] = None, state: Optional[dict] = None):
         self.home = Path(home or Path.home())
         self.state = state if state is not None else {}
-        self.dsh_dir = self.home / ".dsh"
+        self.dsh_dir = self._find_dsh_dir()
+
+    def _find_dsh_dir(self) -> Path:
+        candidates = [
+            self.home / ".dsh",
+            self.home / "Library" / "Application Support" / "DeepSeek" / ".dsh",
+            self.home / "Library" / "Application Support" / "DeepSeek",
+            self.home / ".config" / "deepseek" / ".dsh",
+            self.home / ".config" / "deepseek",
+        ]
+        return next((p for p in candidates if (p / "storages" / "session_projcache" / "sessions").is_dir()), self.home / ".dsh")
 
     def available(self) -> bool:
         return (self.dsh_dir / "storages" / "session_projcache" / "sessions").is_dir()
@@ -1024,6 +1038,10 @@ class KimiWatcher:
     def _get_base_dir(self) -> Optional[Path]:
         candidates = [
             self.home / "AppData" / "Roaming" / "kimi-desktop" / "daimon-share" / "daimon" / "runtime" / "kimi-code" / "home" / "sessions",
+            self.home / "Library" / "Application Support" / "kimi-desktop" / "daimon-share" / "daimon" / "runtime" / "kimi-code" / "home" / "sessions",
+            self.home / "Library" / "Application Support" / "Kimi" / "daimon-share" / "daimon" / "runtime" / "kimi-code" / "home" / "sessions",
+            self.home / ".config" / "kimi-desktop" / "daimon-share" / "daimon" / "runtime" / "kimi-code" / "home" / "sessions",
+            self.home / ".config" / "Kimi" / "daimon-share" / "daimon" / "runtime" / "kimi-code" / "home" / "sessions",
             self.home / ".kimi-desktop" / "daimon-share" / "daimon" / "runtime" / "kimi-code" / "home" / "sessions",
             Path(os.environ.get("APPDATA", "")) / "kimi-desktop" / "daimon-share" / "daimon" / "runtime" / "kimi-code" / "home" / "sessions",
         ]

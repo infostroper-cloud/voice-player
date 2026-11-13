@@ -1958,6 +1958,8 @@ class _HookHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
+        if getattr(self, "close_connection", False):
+            self.send_header("Connection", "close")
         self.end_headers()
         self.wfile.write(body)
 
@@ -1994,9 +1996,21 @@ class _HookHandler(BaseHTTPRequestHandler):
             self.app.root.after(0, lambda: self.app._api_transcribe(src))
             self._json(200, {"ok": True, "queued": True}); return
         if self.path == "/api/show":
+            try:
+                length = int(self.headers.get("Content-Length", "0"))
+                if length: self.rfile.read(length)
+            except Exception:
+                pass
+            self.close_connection = True
             self.app.root.after(0, self.app._show_window)
             self._json(200, {"ok": True}); return
         if self.path == "/api/clear":
+            try:
+                length = int(self.headers.get("Content-Length", "0"))
+                if length: self.rfile.read(length)
+            except Exception:
+                pass
+            self.close_connection = True
             self.app.clear_queue()
             self._json(200, {"ok": True}); return
         self._json(404, {"error": "not found"})
@@ -2027,7 +2041,12 @@ def start_http_listener(app: "VoicePlayerApp") -> ThreadingHTTPServer:
                 pfile.write_text(str(cand), encoding="utf-8")
             except Exception:
                 pass
-            threading.Thread(target=srv.serve_forever, daemon=True, name="hook-listener").start()
+            def _safe_serve(server):
+                try:
+                    server.serve_forever()
+                except (OSError, ValueError):
+                    pass
+            threading.Thread(target=_safe_serve, args=(srv,), daemon=True, name="hook-listener").start()
             return srv
         except OSError as e:
             last_err = e
@@ -7477,7 +7496,7 @@ class VoicePlayerApp:
 
     # ------------------ загрузка аудиофайла + транскрибация ------------------
     def _setup_tray(self):
-        if not IS_WIN:
+        if sys.platform == "darwin":
             return
         if getattr(self, "_tray", None):
             return
@@ -7512,9 +7531,31 @@ class VoicePlayerApp:
         try:
             if self.mini is not None and self.mini.winfo_exists():
                 self._exit_mini()
-            self.root.deiconify(); self.root.state("normal")
-            self.root.attributes("-topmost", True)   # Windows не даёт фокус фоновым окнам без этого
-            self.root.lift(); self.root.focus_force()
+            self.root.deiconify()
+            self.root.state("normal")
+            if IS_WIN:
+                try:
+                    wid = self.root.winfo_id()
+                    hwnd = ctypes.windll.user32.GetAncestor(wid, 2) or wid
+                    ctypes.windll.user32.ShowWindow(hwnd, 9)  # SW_RESTORE
+                    ctypes.windll.user32.SetForegroundWindow(hwnd)
+                except Exception:
+                    pass
+            elif sys.platform == "darwin":
+                try:
+                    subprocess.run(["osascript", "-e", 'tell application "VoicePlayer" to activate'],
+                                   timeout=1, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                except Exception:
+                    pass
+            elif sys.platform.startswith("linux"):
+                try:
+                    subprocess.run(["wmctrl", "-x", "-a", "voiceplayer"],
+                                   timeout=1, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                except Exception:
+                    pass
+            self.root.attributes("-topmost", True)   # гарантированный фокус поверх окон
+            self.root.lift()
+            self.root.focus_force()
             self.root.after(150, lambda: self.root.attributes("-topmost", False))
         except Exception:
             pass
@@ -9160,11 +9201,15 @@ class VoicePlayerApp:
         ttk.Button(w, text=vp_i18n.t("close"), style="Primary.TButton", command=w.destroy).pack(pady=10)
 
     def on_close(self):
-        """Обработка нажатия на крестик окна: свернуть в системный трей вместо завершения."""
-        if getattr(self, "var_close_to_tray", None) and self.var_close_to_tray.get() and IS_WIN:
+        """Обработка нажатия на крестик окна: свернуть в системный трей/док вместо завершения."""
+        if getattr(self, "var_close_to_tray", None) and self.var_close_to_tray.get():
             if not getattr(self, "_tray", None):
                 self._setup_tray()
             if getattr(self, "_tray", None):
+                self._minimize_to_tray()
+                return
+            elif sys.platform == "darwin":
+                # На macOS при закрытии окна приложение остаётся доступным в Dock
                 self._minimize_to_tray()
                 return
         self.exit_app()
@@ -9304,23 +9349,43 @@ _instance_mutex = None     # держим ссылку до конца проц�
 
 
 def _claim_single_instance() -> bool:
-    """Два запуска подряд: порт первой копии ещё не открыт, поэтому спрашиваем Windows."""
+    """Два запуска подряд: порт первой копии ещё не открыт, поэтому спрашиваем ОС."""
     global _instance_mutex, HTTP_PORT
-    if not IS_WIN:
-        return True
-    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-    kernel32.CreateMutexW.restype = ctypes.c_void_p
-    for port in (HTTP_PORT, 3738, 3739, 3740, 3741):
-        if port in _dead_ports:
-            continue
-        m = kernel32.CreateMutexW(None, False, f"Local\\VoicePlayer-{port}")
-        if ctypes.get_last_error() != 183:      # ERROR_ALREADY_EXISTS
-            _instance_mutex = m
-            HTTP_PORT = port
+    if IS_WIN:
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.CreateMutexW.restype = ctypes.c_void_p
+        for port in (HTTP_PORT, 3738, 3739, 3740, 3741):
+            if port in _dead_ports:
+                continue
+            m = kernel32.CreateMutexW(None, False, f"Local\\VoicePlayer-{port}")
+            if ctypes.get_last_error() != 183:      # ERROR_ALREADY_EXISTS
+                _instance_mutex = m
+                HTTP_PORT = port
+                return True
+            if m:
+                kernel32.CloseHandle(m)
+        return False
+    else:
+        # Linux / macOS: fcntl file lock
+        try:
+            import fcntl
+            lock_dir = Path.home() / ".voice-player"
+            lock_dir.mkdir(parents=True, exist_ok=True)
+            for port in (HTTP_PORT, 3738, 3739, 3740, 3741):
+                if port in _dead_ports:
+                    continue
+                lock_path = lock_dir / f".instance-{port}.lock"
+                try:
+                    f = open(lock_path, "a+")
+                    fcntl.flock(f.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    _instance_mutex = f
+                    HTTP_PORT = port
+                    return True
+                except (BlockingIOError, OSError):
+                    pass
+            return False
+        except Exception:
             return True
-        if m:
-            kernel32.CloseHandle(m)
-    return False
 
 
 def _self_test() -> int:

@@ -400,77 +400,94 @@ def _is_installed(tool_id: str, home: Path) -> bool:
                for p in ("antigravity", "antigravity-ide", "antigravity-cli")):
             return True
 
-    # Для изолированных модульных тестов с тестовым каталогом — проверяем только его
+    # Системное обнаружение: проверяем пути относительно home
     is_real_user_home = (home == Path.home())
-    if not is_real_user_home:
-        return False
-
-    # Системное обнаружение на реальной машине пользователя
     if tool_id == "terminal":
         return True
-    if tool_id == "antigravity":
-        return bool(shutil.which("agy")) or bool(shutil.which("antigravity"))
-    if tool_id == "codex":
-        return bool(shutil.which("codex"))
-    if tool_id == "claude-code":
-        return bool(shutil.which("claude"))
     if tool_id == "cursor":
-        return ((home / "AppData/Roaming/Cursor").exists()
-                or bool(shutil.which("cursor"))
-                or Path("/Applications/Cursor.app").exists())
-    if tool_id == "gemini":
-        return bool(shutil.which("gemini"))
+        if (home / "AppData/Roaming/Cursor").exists() or (home / "Library/Application Support/Cursor").exists() or (home / ".config/Cursor").exists():
+            return True
+        if is_real_user_home and (Path("/Applications/Cursor.app").exists() or bool(shutil.which("cursor"))):
+            return True
     if tool_id == "cline":
         cline_paths = [
             home / "AppData/Roaming/Code/User/globalStorage/saoudrizwan.claude-dev",
             home / ".config/Code/User/globalStorage/saoudrizwan.claude-dev",
             home / "Library/Application Support/Code/User/globalStorage/saoudrizwan.claude-dev",
         ]
-        return any(p.exists() for p in cline_paths) or bool(shutil.which("cline"))
+        if any(p.exists() for p in cline_paths):
+            return True
+        if is_real_user_home and bool(shutil.which("cline")):
+            return True
     if tool_id == "copilot-cli":
-        return (bool(shutil.which("copilot"))
-                or bool(shutil.which("github-copilot-cli"))
-                or (home / ".config/gh/extensions/gh-copilot").exists())
+        if (home / ".config/gh/extensions/gh-copilot").exists():
+            return True
+        if is_real_user_home and (bool(shutil.which("copilot")) or bool(shutil.which("github-copilot-cli"))):
+            return True
     if tool_id == "ollama":
-        return ((home / "AppData/Local/Programs/Ollama").exists()
-                or (home / "AppData/Local/Ollama").exists()
-                or (home / ".ollama").exists()
-                or bool(shutil.which("ollama")))
+        ollama_home_paths = [
+            home / "AppData/Local/Programs/Ollama",
+            home / "AppData/Local/Ollama",
+            home / ".ollama",
+            home / "Library/Application Support/Ollama",
+            home / ".local/share/ollama",
+        ]
+        if any(p.exists() for p in ollama_home_paths):
+            return True
+        if is_real_user_home:
+            return (Path("/var/lib/ollama").exists()
+                    or Path("/Applications/Ollama.app").exists()
+                    or bool(shutil.which("ollama")))
     if tool_id == "vscode":
         vscode_paths = [
             home / "AppData/Roaming/Code",
             home / ".config/Code",
             home / "Library/Application Support/Code",
-            Path("/Applications/Visual Studio Code.app"),
         ]
-        return any(p.exists() for p in vscode_paths) or bool(shutil.which("code"))
+        if any(p.exists() for p in vscode_paths):
+            return True
+        if is_real_user_home and (Path("/Applications/Visual Studio Code.app").exists() or bool(shutil.which("code"))):
+            return True
     if tool_id == "perplexity":
         perp_paths = [
             home / "AppData/Local/Perplexity",
             home / "AppData/Roaming/Perplexity",
             home / "AppData/Local/Programs/Perplexity",
+            home / "Library/Application Support/Perplexity",
             home / ".config/perplexity",
-            Path("/Applications/Perplexity.app"),
         ]
-        return any(p.exists() for p in perp_paths) or bool(shutil.which("perplexity"))
+        if any(p.exists() for p in perp_paths):
+            return True
+        if is_real_user_home and (Path("/Applications/Perplexity.app").exists() or bool(shutil.which("perplexity"))):
+            return True
     if tool_id == "comet":
         comet_paths = [
             home / "AppData/Local/Perplexity/Comet",
             home / "AppData/Local/Perplexity/Comet/Application/comet.exe",
             home / "AppData/Roaming/Comet",
-            Path("/Applications/Comet.app"),
+            home / "Library/Application Support/Comet",
         ]
-        return any(p.exists() for p in comet_paths) or bool(shutil.which("comet"))
+        if any(p.exists() for p in comet_paths):
+            return True
+        if is_real_user_home and (Path("/Applications/Comet.app").exists() or bool(shutil.which("comet"))):
+            return True
     if tool_id == "kimi":
         kimi_paths = [
             home / "AppData/Local/Programs/kimi-desktop/Kimi.exe",
             home / "AppData/Local/Programs/kimi-desktop",
             home / "AppData/Roaming/kimi-desktop",
             home / "AppData/Roaming/Kimi",
+            home / "Library/Application Support/kimi-desktop",
+            home / "Library/Application Support/Kimi",
+            home / ".config/kimi-desktop",
+            home / ".config/Kimi",
+            home / ".kimi-desktop",
             home / ".kimi-webbridge",
-            Path("/Applications/Kimi.app"),
         ]
-        return any(p.exists() for p in kimi_paths) or bool(shutil.which("kimi"))
+        if any(p.exists() for p in kimi_paths):
+            return True
+        if is_real_user_home and (Path("/Applications/Kimi.app").exists() or bool(shutil.which("kimi"))):
+            return True
     if tool_id == "deepseek":
         dsh_paths = [
             home / ".dsh",
@@ -478,25 +495,48 @@ def _is_installed(tool_id: str, home: Path) -> bool:
             home / "AppData/Local/Programs/DeepSeek Harness/DeepSeek Harness.exe",
             home / "AppData/Roaming/@deepseek-ai",
             home / "AppData/Local/@deepseek-aidsh-desktop-updater",
+            home / "Library/Application Support/DeepSeek",
+            home / ".config/deepseek",
             home / ".deepseek",
-            Path("/Applications/DeepSeek Harness.app"),
-            Path("/Applications/DeepSeek.app"),
         ]
-        return any(p.exists() for p in dsh_paths) or bool(shutil.which("deepseek")) or bool(shutil.which("deepseek-harness"))
+        if any(p.exists() for p in dsh_paths):
+            return True
+        if is_real_user_home and (Path("/Applications/DeepSeek Harness.app").exists() or Path("/Applications/DeepSeek.app").exists() or bool(shutil.which("deepseek")) or bool(shutil.which("deepseek-harness"))):
+            return True
     if tool_id == "hermes-desktop":
         hermes_paths = [
             home / "AppData/Local/Programs/Hermes",
-            Path("/Applications/Hermes.app"),
+            home / "Library/Application Support/Hermes",
         ]
-        return any(p.exists() for p in hermes_paths) or bool(shutil.which("hermes-desktop"))
+        if any(p.exists() for p in hermes_paths):
+            return True
+        if is_real_user_home and (Path("/Applications/Hermes.app").exists() or bool(shutil.which("hermes-desktop"))):
+            return True
     if tool_id == "aider":
-        return (home / ".aider.chat.history.md").exists() or bool(shutil.which("aider"))
+        return (home / ".aider.chat.history.md").exists() or (is_real_user_home and bool(shutil.which("aider")))
     if tool_id == "windsurf":
         wind_paths = [
             home / "AppData/Roaming/Windsurf",
-            Path("/Applications/Windsurf.app"),
+            home / "Library/Application Support/Windsurf",
+            home / ".config/Windsurf",
         ]
-        return any(p.exists() for p in wind_paths) or bool(shutil.which("windsurf"))
+        if any(p.exists() for p in wind_paths):
+            return True
+        if is_real_user_home and (Path("/Applications/Windsurf.app").exists() or bool(shutil.which("windsurf"))):
+            return True
+
+    # Для фиктивного каталога вне тестов CLI-бинарники не ищем
+    if not is_real_user_home:
+        return False
+
+    if tool_id == "antigravity":
+        return bool(shutil.which("agy")) or bool(shutil.which("antigravity"))
+    if tool_id == "codex":
+        return bool(shutil.which("codex"))
+    if tool_id == "claude-code":
+        return bool(shutil.which("claude"))
+    if tool_id == "gemini":
+        return bool(shutil.which("gemini"))
 
     bin_name = tool_id.replace("-code", "").replace("-agent", "").replace("-cli", "")
     return bool(shutil.which(bin_name))
