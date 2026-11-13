@@ -605,9 +605,9 @@ else:
     APP_DIR = Path(__file__).resolve().parent
     _RES_DIR = APP_DIR
 APP_VERSION = vp_updater.read_version(APP_DIR)
-UPDATE_FIRST_S = int(os.environ.get("VP_UPDATE_FIRST_S") or 60)        # первая проверка после запуска
-UPDATE_EVERY_S = int(os.environ.get("VP_UPDATE_EVERY_S") or 6 * 3600)
-UPDATE_IDLE_S  = int(os.environ.get("VP_UPDATE_IDLE_S") or 300)        # перезапуск, когда за компьютером никого
+UPDATE_FIRST_S = int(os.environ.get("VP_UPDATE_FIRST_S") or 15)        # первая проверка через 15 сек после запуска
+UPDATE_EVERY_S = int(os.environ.get("VP_UPDATE_EVERY_S") or 7200)       # регулярная проверка каждые 2 часа
+UPDATE_IDLE_S  = int(os.environ.get("VP_UPDATE_IDLE_S") or 180)        # фоновый тихий перезапуск при простое 3 мин
 SPEECH_REVERT_AFTER = 1793608200.0                                     # 02.11.2026 12:30: вышла 1.1.4
 UPDATE_HEALTHY_S = 20                                                  # столько окно должно проработать
 HTTP_HOST   = "127.0.0.1"
@@ -3328,6 +3328,7 @@ class VoicePlayerApp:
             self._update_text_panel()
             self._draw_seek()
             self._apply_window_titlebar_theme(self.root, c)
+            self._restyle_update_banner()
             for child_attr in ("_ai_win", "_support_win"):
                 cw = getattr(self, child_attr, None)
                 if cw is not None and cw.winfo_exists():
@@ -7330,8 +7331,90 @@ class VoicePlayerApp:
             self.lbl_ai.configure(text="")
             self.lbl_ai.grid_remove()
 
+    def _show_update_banner(self, version: str):
+        if not version or getattr(self, "_update_banner_shown", False):
+            return
+        if getattr(self, "_update_banner_widget", None) is not None:
+            return
+        self._update_banner_shown = True
+
+        c = getattr(self, "colors", self._palette(self.var_theme.get() if hasattr(self, "var_theme") else "Тёмная"))
+        bg = c.get("panel2", "#1c211f")
+        sig = c.get("signal", "#7ee2b8")
+        ink = c.get("ink", "#e8ecea")
+        hair = c.get("hairline", "#232927")
+        mute = c.get("mute", "#7c8782")
+        pri_fg = self._on_signal_fg(sig)
+
+        banner = tk.Frame(self.root, bg=bg, highlightthickness=1, highlightbackground=hair, padx=14, pady=8)
+        self._update_banner_widget = banner
+        try:
+            banner.pack(side="top", fill="x", before=self.body)
+        except Exception:
+            banner.pack(side="top", fill="x")
+
+        left_box = tk.Frame(banner, bg=bg)
+        left_box.pack(side="left", fill="x", expand=True)
+
+        lbl_icon = tk.Label(left_box, text="🚀", bg=bg, font=self._f(12))
+        lbl_icon.pack(side="left", padx=(0, 8))
+
+        lbl_title = tk.Label(left_box, text=f"Доступно обновление VoicePlayer v{version}",
+                             bg=bg, fg=ink, font=self._f_semi(10))
+        lbl_title.pack(side="left")
+
+        lbl_desc = tk.Label(left_box, text=" — обновление скачано в фоне и готово к установке.",
+                            bg=bg, fg=mute, font=self._f(9))
+        lbl_desc.pack(side="left", padx=(2, 0))
+
+        right_box = tk.Frame(banner, bg=bg)
+        right_box.pack(side="right")
+
+        btn_restart = tk.Button(
+            right_box, text="Перезагрузить для обновления", bg=sig, fg=pri_fg,
+            activebackground=self._shade(sig, -0.08), activeforeground=pri_fg,
+            relief="flat", bd=0, padx=12, pady=5, font=self._f_semi(9), cursor="hand2",
+            command=self._apply_update_now
+        )
+        btn_restart.pack(side="right", padx=(8, 0))
+
+        btn_later = tk.Button(
+            right_box, text="Позже", bg=bg, fg=mute,
+            activebackground=c.get("active", "#262e2b"), activeforeground=ink,
+            relief="flat", bd=0, padx=8, pady=5, font=self._f(9), cursor="hand2",
+            command=self._dismiss_update_banner
+        )
+        btn_later.pack(side="right")
+
+    def _dismiss_update_banner(self):
+        w = getattr(self, "_update_banner_widget", None)
+        if w is not None:
+            try:
+                w.destroy()
+            except Exception:
+                pass
+            self._update_banner_widget = None
+
+    def _restyle_update_banner(self):
+        w = getattr(self, "_update_banner_widget", None)
+        if w is not None and w.winfo_exists():
+            v = getattr(self, "_update_ready", "")
+            self._dismiss_update_banner()
+            self._update_banner_shown = False
+            if v:
+                self._show_update_banner(v)
+
+    def _apply_update_now(self):
+        self._dismiss_update_banner()
+        try:
+            self._autosave_session()
+        except Exception:
+            pass
+        self._apply_update()
+
     def _build_update_tab(self, tab):
-        ttk.Label(tab, text=f"{vp_i18n.t('version')} {APP_VERSION}").grid(row=0, column=0, columnspan=2, sticky="w")
+        ttk.Label(tab, text=f"{vp_i18n.t('version')} {APP_VERSION}", style="Hero.TLabel").grid(
+            row=0, column=0, columnspan=2, sticky="w")
         var = tk.BooleanVar(value=self._auto_update)
 
         def toggle():
@@ -7339,14 +7422,18 @@ class VoicePlayerApp:
             self._save_prefs()
 
         ttk.Checkbutton(tab, text=vp_i18n.t("auto_update"), variable=var, command=toggle).grid(
-            row=1, column=0, columnspan=2, sticky="w", pady=(8, 0))
-        ttk.Label(tab, wraplength=560, style="Dim.TLabel",
+            row=1, column=0, columnspan=2, sticky="w", pady=(10, 0))
+        ttk.Label(tab, wraplength=580, style="Dim.TLabel",
                   text=vp_i18n.t("auto_update_desc")).grid(
             row=2, column=0, columnspan=2, sticky="w", pady=(4, 0))
-        ttk.Button(tab, text=vp_i18n.t("check_updates_now"),
+        btn_box = ttk.Frame(tab)
+        btn_box.grid(row=3, column=0, columnspan=2, sticky="w", pady=(12, 0))
+        ttk.Button(btn_box, text=vp_i18n.t("check_updates_now"),
                    command=lambda: threading.Thread(target=self._check_update, args=(True,), daemon=True,
-                                                    name="update-check").start()).grid(
-            row=3, column=0, sticky="w", pady=(10, 0))
+                                                    name="update-check").start()).pack(side="left")
+        if getattr(self, "_update_ready", ""):
+            ttk.Button(btn_box, text=f"🚀 Перезагрузить сейчас (v{self._update_ready})", style="Primary.TButton",
+                       command=self._apply_update_now).pack(side="left", padx=(10, 0))
 
     def _update_loop(self):
         if self.stop_event.wait(UPDATE_FIRST_S):
@@ -7370,9 +7457,14 @@ class VoicePlayerApp:
             return
         if version:
             self._update_ready = version
-            status(f"версия {version} готова, плеер перезапустится, когда освободится")
+            status(f"новая версия {version} скачана и готова к установке", ok=True)
+            self.root.after(0, lambda: self._show_update_banner(version))
         elif manual:
-            status(f"установлена последняя версия ({APP_VERSION})")
+            if self._update_ready:
+                status(f"версия {self._update_ready} уже скачана и готова к установке", ok=True)
+                self.root.after(0, lambda: self._show_update_banner(self._update_ready))
+            else:
+                status(f"установлена последняя версия ({APP_VERSION})")
 
     def _user_idle_s(self) -> float:
         if not IS_WIN:
@@ -7398,6 +7490,11 @@ class VoicePlayerApp:
             if (not self._update_ready and self._auto_update
                     and vp_updater.parse_version(on_disk) > vp_updater.parse_version(APP_VERSION)):
                 self._update_ready = on_disk
+            best = vp_updater.best_installed(vp_updater.parse_version(APP_VERSION))
+            if best and not self._update_ready:
+                self._update_ready = vp_updater.read_version(best)
+            if self._update_ready and not getattr(self, "_update_banner_shown", False):
+                self._show_update_banner(self._update_ready)
             if self._update_ready and self._auto_update and self._can_restart_now():
                 self._apply_update()
                 return
@@ -7407,6 +7504,10 @@ class VoicePlayerApp:
 
     def _apply_update(self):
         log_line(f"update: перезапуск на версию {self._update_ready}")
+        try:
+            self._autosave_session()
+        except Exception:
+            pass
         hidden = self.root.state() != "normal"
         vp_updater.restart(APP_DIR, ["--background"] if hidden else [])
         self.on_close()

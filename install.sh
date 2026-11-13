@@ -176,8 +176,10 @@ LOCAL_LAUNCHER="$HOME/.local/bin/voiceplayer"
 
 cat << EOF > "$LOCAL_LAUNCHER"
 #!/usr/bin/env bash
-cd "$TARGET_DIR"
-exec "$PY_BIN" "$TARGET_DIR/app.py" "\$@"
+LATEST=\$(ls -d "\$HOME/.voice-player/versions/"[0-9]* 2>/dev/null | sort -V | tail -n 1)
+RUN_DIR="\${LATEST:-\$TARGET_DIR}"
+cd "\$RUN_DIR"
+exec "$PY_BIN" "\$RUN_DIR/app.py" "\$@"
 EOF
 chmod +x "$LOCAL_LAUNCHER"
 
@@ -220,8 +222,10 @@ if [ "$PLATFORM" = "macOS" ]; then
     cat << EOF > "$MAC_APP/Contents/MacOS/VoicePlayer"
 #!/usr/bin/env bash
 export TK_SILENCE_DEPRECATION=1
-cd "$TARGET_DIR"
-exec "$PY_BIN" "$TARGET_DIR/app.py" "\$@"
+LATEST=\$(ls -d "\$HOME/.voice-player/versions/"[0-9]* 2>/dev/null | sort -V | tail -n 1)
+RUN_DIR="\${LATEST:-\$TARGET_DIR}"
+cd "\$RUN_DIR"
+exec "$PY_BIN" "\$RUN_DIR/app.py" "\$@"
 EOF
     chmod +x "$MAC_APP/Contents/MacOS/VoicePlayer"
 
@@ -265,8 +269,10 @@ EOF
     cat << EOF > "$MAC_LAUNCHER"
 #!/usr/bin/env bash
 export TK_SILENCE_DEPRECATION=1
-cd "$TARGET_DIR"
-exec "$PY_BIN" "$TARGET_DIR/app.py" "\$@"
+LATEST=\$(ls -d "\$HOME/.voice-player/versions/"[0-9]* 2>/dev/null | sort -V | tail -n 1)
+RUN_DIR="\${LATEST:-\$TARGET_DIR}"
+cd "\$RUN_DIR"
+exec "$PY_BIN" "\$RUN_DIR/app.py" "\$@"
 EOF
     chmod +x "$MAC_LAUNCHER"
 

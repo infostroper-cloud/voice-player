@@ -166,7 +166,9 @@ def restart(app_dir: Path, args: list = ()) -> None:
                          stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                          close_fds=True, creationflags=NO_WINDOW)
         return
-    subprocess.Popen([gui_python(), str(Path(app_dir) / "app.py")] + list(args), env=env, cwd=str(app_dir),
+    target = best_installed(parse_version(read_version(app_dir))) or Path(app_dir)
+    _note_start(target)
+    subprocess.Popen([gui_python(), str(target / "app.py")] + list(args), env=env, cwd=str(target),
                      stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                      close_fds=True, creationflags=NO_WINDOW)
 
@@ -396,6 +398,13 @@ def install_launcher() -> Path:
     py.write_text(LAUNCHER, encoding="utf-8")
     if os.name == "nt":
         (home_dir() / "launch.cmd").write_text(f'@start "" "{gui_python()}" "%~dp0launch.pyw"\r\n', encoding="ascii")
+    else:
+        sh = home_dir() / "launch.sh"
+        sh.write_text(f'#!/usr/bin/env bash\nexec "{gui_python()}" "{py}" "$@"\n', encoding="utf-8")
+        try:
+            sh.chmod(0o755)
+        except OSError:
+            pass
     return py
 
 
