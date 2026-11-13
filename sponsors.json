@@ -1,10 +1,11 @@
 {
-  "active": false,
-  "campaign_id": "welcome_2026",
-  "title": "VoicePlayer Pro",
-  "desc": "Слушайте ответы Antigravity, Codex и Claude без интернета и задержек.",
-  "badge": "Pro",
-  "url": "https://web.tribute.tg/p/K1s",
+  "active": true,
+  "campaign_id": "test_promo_2026_01",
+  "title": "Партнёр VoicePlayer · Нейросети для разработчиков",
+  "desc": "Ускорьте написание кода и архитектуру проектов с помощью AI-ассистентов нового поколения.",
+  "badge": "Рекомендация",
+  "btn_text": "Узнать подробнее →",
+  "url": "https://infostroper-cloud.github.io/voice-player/#pro",
   "bg": "#1c211f",
   "accent": "#7ee2b8"
 }

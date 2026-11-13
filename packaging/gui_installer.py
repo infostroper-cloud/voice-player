@@ -27,23 +27,49 @@ from tkinter import ttk, filedialog, messagebox
 NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 PY_INSTALLER_URL = "https://www.python.org/ftp/python/3.12.8/python-3.12.8-amd64.exe"
 
+APP_VERSION_DEFAULT = "1.2.1"
+
 LICENSE_TEXT = """ЛИЦЕНЗИОННОЕ СОГЛАШЕНИЕ С КОНЕЧНЫМ ПОЛЬЗОВАТЕЛЕМ (EULA)
-VoicePlayer — Озвучка ИИ и голосовой ввод
+для программного обеспечения «VoicePlayer» (версия 1.2.x и последующие)
 
-1. УСЛОВИЯ ИСПОЛЬЗОВАНИЯ
-VoicePlayer распространяется бесплатно по открытой лицензии MIT.
-Вы имеете право свободно использовать программу в личных и коммерческих целях,
-устанавливать её на любое количество компьютеров без скрытых платежей и подписок.
+ВАЖНО: Внимательно ознакомьтесь с условиями настоящего Соглашения перед началом установки. Установка, копирование или иное использование Программы означает ваше полное и безоговорочное согласие со всеми положениями настоящего Лицензионного соглашения.
 
-2. КОНФИДЕНЦИАЛЬНОСТЬ И БЕЗОПАСНОСТЬ ДАННЫХ
-• Полная приватность: локальные нейромодели синтеза и распознавания речи работают
-  напрямую на вашем компьютере.
-• VoicePlayer не сохраняет, не анализирует и не передает третьим лицам
-  содержимое ваших диалогов с нейросетями, буфера обмена или аудиозаписей.
-• Сетевое подключение используется исключительно для автообновления программы
-  и облачных голосов Microsoft Edge TTS (по выбору пользователя).
+1. ПРЕДМЕТ СОГЛАШЕНИЯ И ПРЕДОСТАВЛЕНИЕ ЛИЦЕНЗИИ
+1.1. Настоящее Лицензионное соглашение является юридическим документом, заключаемым между вами (физическим или юридическим лицом) и разработчиком программного обеспечения VoicePlayer.
+1.2. VoicePlayer является свободным программным обеспечением с открытым исходным кодом, распространяемым по международной лицензии MIT License.
+1.3. Пользователю предоставляется бесплатная, неисключительная, бессрочная лицензия на использование Программы на неограниченном количестве вычислительных устройств для любых личных, образовательных, профессиональных и коммерческих целей без каких-либо роялти и скрытых платежей.
 
-3. ОТКАЗ ОТ ОТВЕТСТВЕННОСТИ (MIT LICENSE)
+2. КОНФИДЕНЦИАЛЬНОСТЬ, ПРИВАТНОСТЬ И БЕЗОПАСНОСТЬ ДАННЫХ (LOCAL-FIRST)
+2.1. Разработчик придерживается политики абсолютной защиты конфиденциальности пользователей (Privacy-by-Design):
+    • Все алгоритмы синтеза речи (локальный движок Piper TTS) и локального распознавания (Whisper) выполняются непосредственно на оборудовании пользователя без отправки текстовых данных на внешние серверы.
+    • Программа НЕ осуществляет сбор, передачу или хранение содержимого диалогов с нейросетями, буфера обмена, озвучиваемых файлов, персональных документов или голосовых записей.
+    • Программа использует сетевые подключения исключительно для:
+        а) загрузки опциональных облачных голосов (Microsoft Edge TTS) по прямому выбору пользователя;
+        б) автоматической проверки наличия обновлений программы;
+        в) передачи обезличенных статистических агрегатов (номер версии, операционная система, суммарное время работы) без идентификации личности.
+
+3. ИНТЕГРАЦИИ СО СТОРОННИМИ ПЛАТФОРМАМИ И СЕРВИСАМИ ИИ
+3.1. VoicePlayer предоставляет возможности автоматического сопряжения с внешними инструментами разработки и искусственного интеллекта (Antigravity, Codex, Claude Code, Cursor и др.).
+3.2. Разработчик VoicePlayer не несёт ответственности за политику конфиденциальности, работоспособность, тарификацию или изменения в API сторонних сервисов и программных платформ.
+
+4. ПРАВА НА ПОЛЬЗОВАТЕЛЬСКИЙ КОНТЕНТ
+4.1. Все права на тексты, файлы, аудиозаписи и синтезированную речь, созданные или обработанные с помощью Программы, безоговорочно принадлежат Пользователю.
+4.2. Разработчик не претендует на авторские или смежные права в отношении результатов работы Пользователя в Программе.
+
+5. ОБНОВЛЕНИЯ ПРОГРАММНОГО ОБЕСПЕЧЕНИЯ
+5.1. Программа включает механизм автоматического обновления для обеспечения стабильности, безопасности и расширения функционала.
+5.2. Пользователь вправе отключить автоматические обновления в любое время через меню настроек Программы.
+
+6. ДЕИНСТАЛЛЯЦИЯ И УДАЛЕНИЕ
+6.1. Программа корректно регистрируется в операционной системе Windows и может быть полностью и без остатка удалена штатными средствами («Параметры Windows → Приложения → Установленные приложения» либо «Панель управления → Программы и компоненты»).
+
+7. ОТКАЗ ОТ ГАРАНТИЙ И ОГРАНИЧЕНИЕ ОТВЕТСТВЕННОСТИ (MIT LICENSE)
+7.1. ПРОГРАММА ПРЕДОСТАВЛЯЕТСЯ НА УСЛОВИЯХ «КАК ЕСТЬ» («AS IS»), БЕЗ КАКИХ-ЛИБО ЯВНЫХ ИЛИ ПОДРАЗУМЕВАЕМЫХ ГАРАНТИЙ, ВКЛЮЧАЯ, НО НЕ ОГРАНИЧИВАЯСЬ, ГАРАНТИЯМИ ТОВАРНОЙ ПРИГОДНОСТИ, СООТВЕТСТВИЯ ОПРЕДЕЛЕННЫМ ЦЕЛЯМ И ОТСУТСТВИЯ НАРУШЕНИЙ.
+7.2. НИ ПРИ КАКИХ ОБСТОЯТЕЛЬСТВАХ АВТОРЫ ИЛИ ПРАВООБЛАДАТЕЛИ НЕ НЕСУТ ОТВЕТСТВЕННОСТИ ПО ИСКАМ О ВОЗМЕЩЕНИИ УЩЕРБА, УБЫТКОВ ИЛИ ИНЫХ ТРЕБОВАНИЙ, ВОЗНИКШИХ В СВЯЗИ С ИСПОЛЬЗОВАНИЕМ ПРОГРАММЫ.
+
+----------------------------------------------------------------------
+OFFICIAL MIT LICENSE TEXT:
+
 Copyright (c) 2026 Anton Sorokin and VoicePlayer Contributors.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -78,7 +104,6 @@ def _bundled_zip() -> Path:
     out_zips = sorted((Path(__file__).resolve().parent / "Output").glob("voice-player-*.zip"))
     if out_zips:
         return out_zips[-1]
-    # Поиск в родительской папке проекта (при запуске из репозитория)
     root_zips = sorted(Path(__file__).resolve().parents[1].glob("voice-player-*.zip"))
     if root_zips:
         return root_zips[-1]
@@ -86,7 +111,6 @@ def _bundled_zip() -> Path:
 
 
 def _find_system_python() -> str | None:
-    """Найти рабочий системный python.exe (>= 3.10) вне текущего PyInstaller-процесса."""
     candidates = []
     for cmd in ("python", "python3"):
         p = shutil.which(cmd)
@@ -167,7 +191,6 @@ def run_install(
     status_cb,
     start_app: bool = False
 ) -> str:
-    """Выполнить установку VoicePlayer в выбранную папку."""
     zp = _bundled_zip()
     py = _ensure_python(status_cb)
     dest_dir.mkdir(parents=True, exist_ok=True)
@@ -211,11 +234,12 @@ class ClassicInstallerWizard:
     def __init__(self, root: tk.Tk):
         self.root = root
         self.root.title("Установка VoicePlayer")
-        self.root.geometry("580x430")
-        self.root.resizable(False, False)
+        # Увеличенный комфортный размер для правильного отображения на любых экранах и масштабах
+        self.root.geometry("620x510")
+        self.root.minsize(580, 480)
+        self.root.resizable(True, True)
         self.root.configure(bg="#131615")
 
-        # DPI awareness
         try:
             ctypes.windll.shcore.SetProcessDpiAwareness(1)
         except Exception:
@@ -235,12 +259,11 @@ class ClassicInstallerWizard:
 
         _apply_dark_titlebar(self.root)
 
-        # Центрирование окна
+        # Центрирование
         self.root.update_idletasks()
         sw, sh = self.root.winfo_screenwidth(), self.root.winfo_screenheight()
-        self.root.geometry(f"580x430+{(sw - 580) // 2}+{(sh - 430) // 2}")
+        self.root.geometry(f"620x510+{(sw - 620) // 2}+{(sh - 510) // 2}")
 
-        # Состояние визарда
         self.current_page = 0
         default_folder = Path(os.environ.get("LOCALAPPDATA", Path.home())) / "Programs" / "VoicePlayer"
         self.var_dest = tk.StringVar(value=str(default_folder))
@@ -250,13 +273,19 @@ class ClassicInstallerWizard:
         self.var_autostart = tk.BooleanVar(value=False)
         self.var_launch_now = tk.BooleanVar(value=True)
 
-        self._installed_ver = ""
+        self._installed_ver = APP_VERSION_DEFAULT
+        try:
+            zp = _bundled_zip()
+            self._installed_ver = zp.stem.replace("voice-player-", "")
+        except Exception:
+            pass
+
         self._build_layout()
         self._show_page(0)
 
     def _build_layout(self):
-        # 1. Верхний заголовок визарда (Header Banner)
-        self.header_frame = tk.Frame(self.root, bg="#181d1b", height=66, highlightthickness=0)
+        # 1. Верхняя плашка шапки (Header Banner)
+        self.header_frame = tk.Frame(self.root, bg="#181d1b", height=68, highlightthickness=0)
         self.header_frame.pack(side="top", fill="x")
         self.header_frame.pack_propagate(False)
 
@@ -282,36 +311,36 @@ class ClassicInstallerWizard:
 
         # 2. Нижняя панель навигации (Bottom Bar)
         tk.Frame(self.root, bg="#262e2b", height=1).pack(side="bottom", fill="x")
-        self.nav_frame = tk.Frame(self.root, bg="#131615", padx=20, pady=12)
+        self.nav_frame = tk.Frame(self.root, bg="#131615", padx=20, pady=14)
         self.nav_frame.pack(side="bottom", fill="x")
 
-        self.lbl_ver_badge = tk.Label(self.nav_frame, text="v1.2.0 · Open Source", bg="#131615",
-                                      fg="#59635f", font=("Segoe UI", 9))
+        self.lbl_ver_badge = tk.Label(self.nav_frame, text=f"v{self._installed_ver} · Open Source", bg="#131615",
+                                      fg="#6b7571", font=("Segoe UI", 9))
         self.lbl_ver_badge.pack(side="left")
 
         self.btn_cancel = tk.Button(
             self.nav_frame, text="Отмена", command=self._confirm_cancel,
             bg="#1c211f", fg="#e8ecea", activebackground="#2a322f", activeforeground="#e8ecea",
-            font=("Segoe UI", 9), bd=0, padx=14, pady=6, cursor="hand2"
+            font=("Segoe UI", 9), bd=0, padx=16, pady=7, cursor="hand2"
         )
         self.btn_cancel.pack(side="right", padx=(8, 0))
 
         self.btn_next = tk.Button(
             self.nav_frame, text="Далее >", command=self._go_next,
-            bg="#7ee2b8", fg="#0d0f0e", activebackground="#6ad6a9", activeforeground="#0d0f0e",
-            font=("Segoe UI Semibold", 9), bd=0, padx=18, pady=6, cursor="hand2"
+            bg="#202624", fg="#59635f", activebackground="#6ad6a9", activeforeground="#0d0f0e",
+            font=("Segoe UI Semibold", 9), bd=0, padx=20, pady=7, cursor="hand2"
         )
         self.btn_next.pack(side="right", padx=(6, 0))
 
         self.btn_back = tk.Button(
             self.nav_frame, text="< Назад", command=self._go_back,
             bg="#1c211f", fg="#e8ecea", activebackground="#2a322f", activeforeground="#e8ecea",
-            font=("Segoe UI", 9), bd=0, padx=14, pady=6, cursor="hand2"
+            font=("Segoe UI", 9), bd=0, padx=16, pady=7, cursor="hand2"
         )
         self.btn_back.pack(side="right")
 
         # 3. Основная область страниц (Body Container)
-        self.body_container = tk.Frame(self.root, bg="#131615", padx=24, pady=14)
+        self.body_container = tk.Frame(self.root, bg="#131615", padx=20, pady=12)
         self.body_container.pack(side="top", fill="both", expand=True)
 
         self._build_page_license()
@@ -324,18 +353,40 @@ class ClassicInstallerWizard:
     def _build_page_license(self):
         self.page_license = tk.Frame(self.body_container, bg="#131615")
 
-        tk.Label(self.page_license, text="Перед установкой программы необходимо принять условия лицензии:",
-                 bg="#131615", fg="#cfd5d2", font=("Segoe UI", 9), anchor="w").pack(fill="x", pady=(0, 6))
+        tk.Label(self.page_license, text="Для продолжения установки необходимо ознакомиться и принять лицензионное соглашение:",
+                 bg="#131615", fg="#d1d8d5", font=("Segoe UI", 9), anchor="w").pack(side="top", fill="x", pady=(0, 6))
 
+        # ВАЖНО: Блок выбора согласия упаковываем к НИЗУ страницы FIRST, чтобы он гарантированно не вытеснялся текстом
+        self.agree_box = tk.Frame(
+            self.page_license, bg="#181d1b", highlightthickness=1,
+            highlightbackground="#2a322f", padx=14, pady=8
+        )
+        self.agree_box.pack(side="bottom", fill="x", pady=(8, 0))
+
+        self.r1 = tk.Radiobutton(
+            self.agree_box, text="Я принимаю условия соглашения", variable=self.var_license, value="agree",
+            command=self._on_license_toggle, bg="#181d1b", fg="#e8ecea", selectcolor="#1c211f",
+            activebackground="#181d1b", activeforeground="#7ee2b8", font=("Segoe UI Semibold", 9), cursor="hand2"
+        )
+        self.r1.pack(anchor="w", pady=(0, 2))
+
+        self.r2 = tk.Radiobutton(
+            self.agree_box, text="Я не принимаю условия соглашения", variable=self.var_license, value="disagree",
+            command=self._on_license_toggle, bg="#181d1b", fg="#7c8782", selectcolor="#1c211f",
+            activebackground="#181d1b", activeforeground="#7c8782", font=("Segoe UI", 9), cursor="hand2"
+        )
+        self.r2.pack(anchor="w")
+
+        # Текстовое поле с прокруткой (занимает всё оставшееся пространство сверху)
         text_wrap = tk.Frame(self.page_license, bg="#1c211f", highlightthickness=1, highlightbackground="#262e2b")
-        text_wrap.pack(fill="both", expand=True, pady=(0, 10))
+        text_wrap.pack(side="top", fill="both", expand=True)
 
         sb = ttk.Scrollbar(text_wrap, orient="vertical")
         sb.pack(side="right", fill="y")
 
         self.txt_license = tk.Text(
             text_wrap, bg="#1c211f", fg="#d1d8d5", insertbackground="#d1d8d5",
-            font=("Segoe UI", 8), wrap="word", bd=0, padx=10, pady=8, yscrollcommand=sb.set
+            font=("Segoe UI", 8), wrap="word", bd=0, padx=12, pady=10, height=11, yscrollcommand=sb.set
         )
         self.txt_license.pack(side="left", fill="both", expand=True)
         sb.configure(command=self.txt_license.yview)
@@ -343,24 +394,14 @@ class ClassicInstallerWizard:
         self.txt_license.insert("1.0", LICENSE_TEXT)
         self.txt_license.configure(state="disabled")
 
-        r1 = tk.Radiobutton(
-            self.page_license, text="Я принимаю условия соглашения", variable=self.var_license, value="agree",
-            command=self._on_license_toggle, bg="#131615", fg="#e8ecea", selectcolor="#1c211f",
-            activebackground="#131615", activeforeground="#7ee2b8", font=("Segoe UI Semibold", 9), cursor="hand2"
-        )
-        r1.pack(anchor="w", pady=(0, 2))
-
-        r2 = tk.Radiobutton(
-            self.page_license, text="Я не принимаю условия соглашения", variable=self.var_license, value="disagree",
-            command=self._on_license_toggle, bg="#131615", fg="#7c8782", selectcolor="#1c211f",
-            activebackground="#131615", activeforeground="#7c8782", font=("Segoe UI", 9), cursor="hand2"
-        )
-        r2.pack(anchor="w")
-
     def _on_license_toggle(self):
         if self.var_license.get() == "agree":
+            self.agree_box.configure(highlightbackground="#7ee2b8")
+            self.r1.configure(fg="#7ee2b8")
             self.btn_next.configure(state="normal", bg="#7ee2b8", fg="#0d0f0e")
         else:
+            self.agree_box.configure(highlightbackground="#2a322f")
+            self.r1.configure(fg="#e8ecea")
             self.btn_next.configure(state="disabled", bg="#202624", fg="#59635f")
 
     # ------------------- Страница 1: Выбор папки установки -------------------
@@ -370,7 +411,7 @@ class ClassicInstallerWizard:
         tk.Label(self.page_dest, text="Программа установит VoicePlayer в следующую папку.",
                  bg="#131615", fg="#e8ecea", font=("Segoe UI", 9), anchor="w").pack(fill="x")
         tk.Label(self.page_dest, text="Чтобы выбрать другую папку, нажмите «Обзор...»:",
-                 bg="#131615", fg="#7c8782", font=("Segoe UI", 9), anchor="w").pack(fill="x", pady=(2, 10))
+                 bg="#131615", fg="#7c8782", font=("Segoe UI", 9), anchor="w").pack(fill="x", pady=(2, 12))
 
         row_dir = tk.Frame(self.page_dest, bg="#131615")
         row_dir.pack(fill="x", pady=(0, 16))
@@ -386,9 +427,8 @@ class ClassicInstallerWizard:
         )
         btn_browse.pack(side="right")
 
-        # Информационная плашка свободного места
         info_card = tk.Frame(self.page_dest, bg="#181d1b", highlightthickness=1, highlightbackground="#262e2b",
-                             padx=14, pady=12)
+                             padx=16, pady=14)
         info_card.pack(fill="x", pady=(4, 0))
 
         tk.Label(info_card, text="Требуется свободного места на диске: ~45 МБ",
@@ -460,10 +500,10 @@ class ClassicInstallerWizard:
 
         self.lbl_install_step = tk.Label(self.page_install, text="Подготовка к установке...",
                                          bg="#131615", fg="#e8ecea", font=("Segoe UI Semibold", 10), anchor="w")
-        self.lbl_install_step.pack(fill="x", pady=(16, 6))
+        self.lbl_install_step.pack(fill="x", pady=(20, 8))
 
-        self.install_bar = ttk.Progressbar(self.page_install, mode="indeterminate", length=520)
-        self.install_bar.pack(fill="x", pady=(0, 12))
+        self.install_bar = ttk.Progressbar(self.page_install, mode="indeterminate", length=540)
+        self.install_bar.pack(fill="x", pady=(0, 14))
 
         self.lbl_install_detail = tk.Label(
             self.page_install, text="Пожалуйста, подождите, пока мастер завершит установку файлов программы.",
@@ -559,7 +599,6 @@ class ClassicInstallerWizard:
             if not dest:
                 messagebox.showwarning("Папка установки", "Пожалуйста, укажите папку для установки VoicePlayer.")
                 return
-            # Проверка доступности записи
             try:
                 p = Path(dest)
                 p.mkdir(parents=True, exist_ok=True)

@@ -2315,6 +2315,7 @@ class VoicePlayerApp:
         self.root.after(15000, self._autosave_session)   # периодически пересохранять очередь
         self.root.after(2500, self._refresh_ai_badge)    # найти установленные нейросети
         self.root.after(3500, self._trigger_telemetry_ping)
+        self.root.after(4500, self._trigger_sponsor_check)
         self.root.after(45000, self._maybe_show_support_reminder)
 
         self.watchers = vp_watchers.Watchers(Path.home() / ".voice-player" / "watchers.json", log=log_line)
@@ -3341,6 +3342,7 @@ class VoicePlayerApp:
             self._draw_seek()
             self._apply_window_titlebar_theme(self.root, c)
             self._restyle_update_banner()
+            self._restyle_sponsor_card(c)
             for child_attr in ("_ai_win", "_support_win"):
                 cw = getattr(self, child_attr, None)
                 if cw is not None and cw.winfo_exists():
@@ -3725,6 +3727,40 @@ class VoicePlayerApp:
         self.tts_input.bind("<Control-KeyPress>", self._input_ctrl)
         self.tts_input.bind("<<Paste>>", self._on_input_paste)
         self._bind_context(self.tts_input, self._show_tts_input_menu)
+
+        # Карточка спонсора / рекомендации (для монетизации бесплатной версии)
+        self.sponsor_card = tk.Frame(mid, bg=panel2, highlightthickness=1, highlightbackground=hairline, padx=10, pady=6)
+        self.sponsor_card.grid(row=6, column=0, sticky="ew", pady=(6, 0))
+        self.sponsor_card.columnconfigure(0, weight=1)
+
+        sp_left = tk.Frame(self.sponsor_card, bg=panel2)
+        sp_left.pack(side="left", fill="both", expand=True)
+
+        sp_top = tk.Frame(sp_left, bg=panel2)
+        sp_top.pack(fill="x")
+        self.lbl_sponsor_badge = tk.Label(sp_top, text="Партнёр", bg="#222b27", fg=signal,
+                                          font=self._f_semi(8), padx=5, pady=1)
+        self.lbl_sponsor_badge.pack(side="left")
+        self.lbl_sponsor_title = tk.Label(sp_top, text="", bg=panel2, fg=ink,
+                                          font=self._f_semi(9), anchor="w")
+        self.lbl_sponsor_title.pack(side="left", padx=(6, 0), fill="x", expand=True)
+
+        self.lbl_sponsor_desc = tk.Label(sp_left, text="", bg=panel2, fg=mute,
+                                         font=self._f(8), justify="left", anchor="w", wraplength=340)
+        self.lbl_sponsor_desc.pack(fill="x", pady=(2, 0))
+
+        sp_right = tk.Frame(self.sponsor_card, bg=panel2)
+        sp_right.pack(side="right", padx=(8, 0))
+
+        self.btn_sponsor_action = ttk.Button(sp_right, text="Подробнее →", style="Toggle.TButton")
+        self.btn_sponsor_action.pack(side="left")
+
+        self.btn_sponsor_close = ttk.Button(sp_right, text="✕", width=2, style="Toggle.TButton",
+                                           command=self._dismiss_sponsor)
+        self.btn_sponsor_close.pack(side="left", padx=(4, 0))
+        self._tt(self.btn_sponsor_close, "Скрыть это предложение")
+
+        self.sponsor_card.grid_remove()
 
         # -------------------- ПРАВАЯ КОЛОНКА: ПАНЕЛЬ ЧТЕНИЯ И ИНСТРУМЕНТЫ --------------------
         self.text_frame = ttk.Frame(self.body, padding=(16, 10))
@@ -7556,6 +7592,66 @@ class VoicePlayerApp:
             )
         except Exception as e:
             log_line(f"telemetry ping: {e}")
+
+    def _trigger_sponsor_check(self):
+        """Проверить удалённый манифест спонсоров/партнёров."""
+        if self._is_supporter():
+            return
+        t = getattr(self, "telemetry", None)
+        if not t:
+            return
+        t.fetch_sponsor_campaign_async(
+            on_sponsor_loaded=lambda data: self.root.after(0, lambda: self._apply_sponsor_campaign(data))
+        )
+
+    def _apply_sponsor_campaign(self, data: dict):
+        if not data or not data.get("active") or self._is_supporter():
+            return
+        cid = data.get("campaign_id", "")
+        dismissed = self.prefs.get("dismissed_sponsors", [])
+        if cid and cid in dismissed:
+            return
+        if not hasattr(self, "sponsor_card"):
+            return
+        self._current_sponsor_data = data
+        self.lbl_sponsor_badge.configure(text=data.get("badge", "Партнёр"))
+        self.lbl_sponsor_title.configure(text=data.get("title", ""))
+        self.lbl_sponsor_desc.configure(text=data.get("desc", ""))
+        url = data.get("url", "https://infostroper-cloud.github.io/voice-player/")
+        self.btn_sponsor_action.configure(
+            text=data.get("btn_text", "Подробнее →"),
+            command=lambda: webbrowser.open(url)
+        )
+        self.sponsor_card.grid()
+
+    def _dismiss_sponsor(self):
+        cid = getattr(self, "_current_sponsor_data", {}).get("campaign_id", "")
+        if cid:
+            dismissed = list(self.prefs.get("dismissed_sponsors", []))
+            if cid not in dismissed:
+                dismissed.append(cid)
+            self.prefs["dismissed_sponsors"] = dismissed
+            self._save_prefs()
+        if hasattr(self, "sponsor_card"):
+            self.sponsor_card.grid_remove()
+
+    def _restyle_sponsor_card(self, c: dict):
+        if not hasattr(self, "sponsor_card") or not self.sponsor_card.winfo_exists():
+            return
+        panel2 = c.get("panel2", "#1c211f")
+        hairline = c.get("hairline", "#232927")
+        ink = c.get("ink", "#e8ecea")
+        mute = c.get("mute", "#7c8782")
+        signal = c.get("signal", "#7ee2b8")
+        self.sponsor_card.configure(bg=panel2, highlightbackground=hairline)
+        for child in self.sponsor_card.winfo_children():
+            try:
+                child.configure(bg=panel2)
+            except Exception:
+                pass
+        self.lbl_sponsor_title.configure(bg=panel2, fg=ink)
+        self.lbl_sponsor_desc.configure(bg=panel2, fg=mute)
+        self.lbl_sponsor_badge.configure(fg=signal)
 
     def _maybe_show_support_reminder(self):
         """Ненавязчивое окно в стиле ненавязчивой поддержки: не чаще раза в 7 дней после ощутимой пользы,
