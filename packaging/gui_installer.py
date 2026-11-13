@@ -261,7 +261,7 @@ class ClassicInstallerWizard:
 
         if sys.platform == "win32":
             try:
-                ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("VoicePlayer.Installer")
+                ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("VoicePlayer.Setup.Installer")
             except Exception:
                 pass
 
@@ -276,9 +276,12 @@ class ClassicInstallerWizard:
         self.installer_ico = next((c for c in ico_candidates if c and c.is_file()), None)
         if self.installer_ico:
             try:
-                self.root.iconbitmap(str(self.installer_ico))
+                self.root.iconbitmap(default=str(self.installer_ico))
             except Exception:
-                pass
+                try:
+                    self.root.iconbitmap(str(self.installer_ico))
+                except Exception:
+                    pass
             try:
                 from PIL import Image, ImageTk
                 img = Image.open(str(self.installer_ico))
@@ -296,27 +299,6 @@ class ClassicInstallerWizard:
         self.root.update_idletasks()
         sw, sh = self.root.winfo_screenwidth(), self.root.winfo_screenheight()
         self.root.geometry(f"620x510+{(sw - 620) // 2}+{(sh - 510) // 2}")
-
-    def _apply_taskbar_icon(self):
-        """Гарантированно установить иконку программы на панели задач Windows (WM_SETICON)."""
-        if sys.platform != "win32" or not getattr(self, "installer_ico", None):
-            return
-        try:
-            import ctypes
-            user32 = ctypes.windll.user32
-            wid = self.root.winfo_id()
-            hwnd = user32.GetAncestor(wid, 2) or wid
-            IMAGE_ICON = 1
-            LR_LOADFROMFILE = 0x0010
-            hicon_big = user32.LoadImageW(None, str(self.installer_ico), IMAGE_ICON, 32, 32, LR_LOADFROMFILE)
-            hicon_small = user32.LoadImageW(None, str(self.installer_ico), IMAGE_ICON, 16, 16, LR_LOADFROMFILE)
-            WM_SETICON = 0x0080
-            if hicon_big:
-                user32.SendMessageW(hwnd, WM_SETICON, 1, hicon_big)
-            if hicon_small:
-                user32.SendMessageW(hwnd, WM_SETICON, 0, hicon_small)
-        except Exception:
-            pass
 
         self.current_page = 0
         default_folder = Path(os.environ.get("LOCALAPPDATA", Path.home())) / "Programs" / "VoicePlayer"
@@ -336,6 +318,39 @@ class ClassicInstallerWizard:
 
         self._build_layout()
         self._show_page(0)
+
+    def _apply_taskbar_icon(self):
+        """Гарантированно установить иконку программы на панели задач Windows (WM_SETICON и GCLP_HICON)."""
+        if sys.platform != "win32" or not getattr(self, "installer_ico", None):
+            return
+        try:
+            import ctypes
+            user32 = ctypes.windll.user32
+            wid = self.root.winfo_id()
+            hwnd = user32.GetAncestor(wid, 2) or wid
+            IMAGE_ICON = 1
+            LR_LOADFROMFILE = 0x0010
+            hicon_big = user32.LoadImageW(None, str(self.installer_ico), IMAGE_ICON, 32, 32, LR_LOADFROMFILE)
+            hicon_small = user32.LoadImageW(None, str(self.installer_ico), IMAGE_ICON, 16, 16, LR_LOADFROMFILE)
+            WM_SETICON = 0x0080
+            if hicon_big:
+                user32.SendMessageW(hwnd, WM_SETICON, 1, hicon_big)
+                try:
+                    set_class = getattr(user32, "SetClassLongPtrW", getattr(user32, "SetClassLongW", None))
+                    if set_class:
+                        set_class(hwnd, -14, hicon_big)  # GCLP_HICON
+                except Exception:
+                    pass
+            if hicon_small:
+                user32.SendMessageW(hwnd, WM_SETICON, 0, hicon_small)
+                try:
+                    set_class = getattr(user32, "SetClassLongPtrW", getattr(user32, "SetClassLongW", None))
+                    if set_class:
+                        set_class(hwnd, -34, hicon_small)  # GCLP_HICONSM
+                except Exception:
+                    pass
+        except Exception:
+            pass
 
     def _build_layout(self):
         # 1. Верхняя плашка шапки (Header Banner)

@@ -698,6 +698,365 @@ class TerminalWatcher:
         }]
 
 
+# ------------------------------------------------------------------ Ollama
+class OllamaWatcher:
+    """Следит за новыми ответами локальной Ollama (база db.sqlite в AppData/Local/Ollama или ~/.ollama)."""
+    source = "ollama"
+
+    def __init__(self, home: Optional[Path] = None, state: Optional[dict] = None):
+        self.home = Path(home or Path.home())
+        self.state = state if state is not None else {}
+
+    def _find_db(self) -> Optional[Path]:
+        candidates = [
+            Path(os.environ.get("LOCALAPPDATA", "")) / "Ollama" / "db.sqlite",
+            self.home / ".ollama" / "db.sqlite",
+            Path(os.environ.get("APPDATA", "")) / "Ollama" / "db.sqlite",
+        ]
+        return next((p for p in candidates if p.is_file()), None)
+
+    def available(self) -> bool:
+        db = self._find_db()
+        return bool(db and db.is_file())
+
+    def poll(self, now: Optional[float] = None) -> list:
+        now = time.time() if now is None else now
+        db = self._find_db()
+        if not db:
+            return []
+
+        last_id = int(self.state.get("last_id", 0))
+        # При первом запуске фиксируем текущий id (чтобы не зачитывать древнюю историю)
+        if not self.state.get("init"):
+            try:
+                con = _ro(db)
+                cur = con.cursor()
+                cur.execute("SELECT max(id) FROM messages")
+                row = cur.fetchone()
+                self.state["last_id"] = int(row[0] or 0)
+                self.state["init"] = True
+                return []
+            except Exception:
+                self.state["init"] = True
+                return []
+
+        out = []
+        try:
+            con = _ro(db)
+            cur = con.cursor()
+            cur.execute(
+                "SELECT id, chat_id, role, content, model_name, created_at, stream "
+                "FROM messages "
+                "WHERE id > ? AND role = 'assistant' AND (stream = 0 OR stream IS NULL) AND length(content) > 0 "
+                "ORDER BY id ASC",
+                (last_id,)
+            )
+            rows = cur.fetchall()
+            for msg_id, chat_id, role, content, model_name, created_at, stream in rows:
+                last_id = max(last_id, msg_id)
+                p_cur = con.cursor()
+                p_cur.execute(
+                    "SELECT content FROM messages WHERE chat_id = ? AND role = 'user' AND id < ? ORDER BY id DESC LIMIT 1",
+                    (chat_id, msg_id)
+                )
+                p_row = p_cur.fetchone()
+                prompt = (p_row[0] or "").strip() if p_row else ""
+
+                c_cur = con.cursor()
+                c_cur.execute("SELECT title FROM chats WHERE id = ?", (chat_id,))
+                c_row = c_cur.fetchone()
+                title = (c_row[0] or "").strip() if c_row else ""
+
+                raw_mod = (model_name or "local").split("/")[-1].split(":")[0]
+                model_label = raw_mod.replace("-GGUF", "").replace("-abliterated", "")
+
+                when = _iso_ts(created_at) or now
+                out.append({
+                    "source": "ollama",
+                    "author": f"Ollama · {model_label}",
+                    "session": chat_id,
+                    "title": title or _short(prompt) or "Ollama",
+                    "prompt": prompt[:300],
+                    "time": time.strftime("%H:%M", time.localtime(when)),
+                    "date": time.strftime("%d.%m.%Y", time.localtime(when)),
+                    "text": content,
+                    "key": f"ollama:{chat_id}:{msg_id}",
+                })
+            self.state["last_id"] = last_id
+        except Exception:
+            pass
+        return out
+
+    def fetch_recent(self, limit: int = 5) -> list:
+        db = self._find_db()
+        if not db:
+            return []
+        out = []
+        try:
+            con = _ro(db)
+            cur = con.cursor()
+            cur.execute(
+                "SELECT id, chat_id, role, content, model_name, created_at "
+                "FROM messages "
+                "WHERE role = 'assistant' AND (stream = 0 OR stream IS NULL) AND length(content) > 0 "
+                "ORDER BY id DESC LIMIT ?",
+                (limit,)
+            )
+            rows = list(reversed(cur.fetchall()))
+            now = time.time()
+            for msg_id, chat_id, role, content, model_name, created_at in rows:
+                p_cur = con.cursor()
+                p_cur.execute(
+                    "SELECT content FROM messages WHERE chat_id = ? AND role = 'user' AND id < ? ORDER BY id DESC LIMIT 1",
+                    (chat_id, msg_id)
+                )
+                p_row = p_cur.fetchone()
+                prompt = (p_row[0] or "").strip() if p_row else ""
+
+                raw_mod = (model_name or "local").split("/")[-1].split(":")[0]
+                model_label = raw_mod.replace("-GGUF", "").replace("-abliterated", "")
+                when = _iso_ts(created_at) or now
+                out.append({
+                    "source": "ollama",
+                    "author": f"Ollama · {model_label}",
+                    "session": chat_id,
+                    "title": _short(prompt) or "Ollama",
+                    "prompt": prompt[:300],
+                    "time": time.strftime("%H:%M", time.localtime(when)),
+                    "date": time.strftime("%d.%m.%Y", time.localtime(when)),
+                    "text": content,
+                    "key": f"ollama:{chat_id}:{msg_id}",
+                })
+        except Exception:
+            pass
+        return out
+
+
+# ------------------------------------------------------------------ DeepSeek Harness
+class DeepSeekWatcher:
+    """Следит за свежими сессиями DeepSeek Harness (~/.dsh)."""
+    source = "deepseek"
+
+    def __init__(self, home: Optional[Path] = None, state: Optional[dict] = None):
+        self.home = Path(home or Path.home())
+        self.state = state if state is not None else {}
+        self.dsh_dir = self.home / ".dsh"
+
+    def available(self) -> bool:
+        return (self.dsh_dir / "storages" / "session_projcache" / "sessions").is_dir()
+
+    def _get_recent_session_files(self) -> list:
+        sess_dir = self.dsh_dir / "storages" / "session_projcache" / "sessions"
+        if not sess_dir.is_dir():
+            return []
+        files = list(sess_dir.glob("session-*.json"))
+        files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+        return files[:8]
+
+    def poll(self, now: Optional[float] = None) -> list:
+        now = time.time() if now is None else now
+        if not self.available():
+            return []
+
+        seen = set(self.state.setdefault("seen", []))
+        first_run = not self.state.get("init")
+        out = []
+
+        for fpath in self._get_recent_session_files():
+            try:
+                with open(fpath, "r", encoding="utf-8", errors="ignore") as f:
+                    data = json.load(f)
+                rows = data.get("record", {}).get("rows", {})
+                turns = rows.get("turnOutline", {}).get("val", {}).get("turns", [])
+                title = rows.get("title", {}).get("val", "") or rows.get("goal", {}).get("val", {}).get("current", {}).get("goal", {}).get("objective", "")
+                sess_id = fpath.stem.replace("session-", "")
+
+                for t in turns:
+                    turn_num = t.get("turn", 0)
+                    seq = t.get("seq", 0)
+                    key = f"dsh:{sess_id}:{turn_num}:{seq}"
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    if first_run:
+                        continue
+                    prompt = (t.get("prompt") or "").strip()
+                    resp = (t.get("response") or "").strip()
+                    if not resp:
+                        continue
+                    mtime = fpath.stat().st_mtime
+                    out.append({
+                        "source": "deepseek",
+                        "author": "DeepSeek Harness",
+                        "session": sess_id,
+                        "title": _short(title or prompt or "DeepSeek"),
+                        "prompt": prompt[:300],
+                        "time": time.strftime("%H:%M", time.localtime(mtime)),
+                        "date": time.strftime("%d.%m.%Y", time.localtime(mtime)),
+                        "text": resp,
+                        "key": key,
+                    })
+            except Exception:
+                continue
+
+        self.state["seen"] = list(seen)[-500:]
+        self.state["init"] = True
+        return out
+
+    def fetch_recent(self, limit: int = 5) -> list:
+        if not self.available():
+            return []
+        out = []
+        for fpath in self._get_recent_session_files():
+            try:
+                with open(fpath, "r", encoding="utf-8", errors="ignore") as f:
+                    data = json.load(f)
+                rows = data.get("record", {}).get("rows", {})
+                turns = rows.get("turnOutline", {}).get("val", {}).get("turns", [])
+                title = rows.get("title", {}).get("val", "") or rows.get("goal", {}).get("val", {}).get("current", {}).get("goal", {}).get("objective", "")
+                sess_id = fpath.stem.replace("session-", "")
+                mtime = fpath.stat().st_mtime
+                for t in reversed(turns):
+                    resp = (t.get("response") or "").strip()
+                    prompt = (t.get("prompt") or "").strip()
+                    if resp:
+                        out.append({
+                            "source": "deepseek",
+                            "author": "DeepSeek Harness",
+                            "session": sess_id,
+                            "title": _short(title or prompt or "DeepSeek"),
+                            "prompt": prompt[:300],
+                            "time": time.strftime("%H:%M", time.localtime(mtime)),
+                            "date": time.strftime("%d.%m.%Y", time.localtime(mtime)),
+                            "text": resp,
+                            "key": f"dsh:{sess_id}:{t.get('turn', 0)}:{t.get('seq', 0)}",
+                        })
+                        if len(out) >= limit:
+                            return out
+            except Exception:
+                continue
+        return out
+
+
+# ------------------------------------------------------------------ Kimi Desktop
+class KimiWatcher:
+    """Следит за сессиями Kimi Desktop (wire.jsonl в AppData/Roaming/kimi-desktop)."""
+    source = "kimi"
+
+    def __init__(self, home: Optional[Path] = None, state: Optional[dict] = None):
+        self.home = Path(home or Path.home())
+        self.state = state if state is not None else {}
+        self.base_dir = Path(os.environ.get("APPDATA", "")) / "kimi-desktop" / "daimon-share" / "daimon" / "runtime" / "kimi-code" / "home" / "sessions"
+
+    def available(self) -> bool:
+        return self.base_dir.is_dir()
+
+    def _get_wire_files(self) -> list:
+        if not self.base_dir.is_dir():
+            return []
+        wires = list(self.base_dir.glob("*/*/agents/main/wire.jsonl"))
+        wires.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+        return wires[:8]
+
+    def poll(self, now: Optional[float] = None) -> list:
+        now = time.time() if now is None else now
+        if not self.available():
+            return []
+
+        files_state = self.state.setdefault("files", {})
+        first_run = not self.state.get("init")
+        out = []
+
+        for wpath in self._get_wire_files():
+            sp = str(wpath)
+            try:
+                sz = wpath.stat().st_size
+            except OSError:
+                continue
+
+            last_off = files_state.get(sp, 0)
+            if first_run:
+                files_state[sp] = sz
+                continue
+            if sz < last_off:
+                last_off = 0
+            if sz == last_off:
+                continue
+
+            try:
+                with open(wpath, "r", encoding="utf-8", errors="ignore") as f:
+                    f.seek(last_off)
+                    chunk = f.read()
+                    files_state[sp] = f.tell()
+                lines = chunk.splitlines()
+                conv_name = wpath.parent.parent.name
+                mtime = wpath.stat().st_mtime
+                for line in lines:
+                    try:
+                        ev = json.loads(line)
+                        if ev.get("type") == "context.append_message":
+                            msg = ev.get("message", {})
+                            if msg.get("role") == "assistant":
+                                content = msg.get("content", [])
+                                txt = "".join(c.get("text", "") for c in content if isinstance(c, dict)).strip()
+                                if txt:
+                                    out.append({
+                                        "source": "kimi",
+                                        "author": "Kimi Desktop",
+                                        "session": conv_name,
+                                        "title": "Kimi",
+                                        "prompt": "",
+                                        "time": time.strftime("%H:%M", time.localtime(mtime)),
+                                        "date": time.strftime("%d.%m.%Y", time.localtime(mtime)),
+                                        "text": txt,
+                                        "key": f"kimi:{conv_name}:{hash(txt)}",
+                                    })
+                    except Exception:
+                        pass
+            except Exception:
+                continue
+
+        self.state["init"] = True
+        return out
+
+    def fetch_recent(self, limit: int = 5) -> list:
+        if not self.available():
+            return []
+        out = []
+        for wpath in self._get_wire_files():
+            conv_name = wpath.parent.parent.name
+            mtime = wpath.stat().st_mtime
+            try:
+                with open(wpath, "r", encoding="utf-8", errors="ignore") as f:
+                    for line in reversed(f.readlines()):
+                        try:
+                            ev = json.loads(line)
+                            if ev.get("type") == "context.append_message":
+                                msg = ev.get("message", {})
+                                if msg.get("role") == "assistant":
+                                    content = msg.get("content", [])
+                                    txt = "".join(c.get("text", "") for c in content if isinstance(c, dict)).strip()
+                                    if txt:
+                                        out.append({
+                                            "source": "kimi",
+                                            "author": "Kimi Desktop",
+                                            "session": conv_name,
+                                            "title": "Kimi",
+                                            "prompt": "",
+                                            "time": time.strftime("%H:%M", time.localtime(mtime)),
+                                            "date": time.strftime("%d.%m.%Y", time.localtime(mtime)),
+                                            "text": txt,
+                                            "key": f"kimi:{conv_name}:{hash(txt)}",
+                                        })
+                                        if len(out) >= limit:
+                                            return out
+                        except Exception:
+                            pass
+            except Exception:
+                pass
+        return out
+
+
 # ---------------------------------------------------------------- общий цикл
 
 class Watchers:
@@ -720,6 +1079,9 @@ class Watchers:
             "cline": ClineWatcher(home, self.state.setdefault("cline", {})),
             "aider": AiderWatcher(home, self.state.setdefault("aider", {})),
             "terminal": TerminalWatcher(home / ".voice-player", self.state.setdefault("terminal", {})),
+            "ollama": OllamaWatcher(home, self.state.setdefault("ollama", {})),
+            "deepseek": DeepSeekWatcher(home, self.state.setdefault("deepseek", {})),
+            "kimi": KimiWatcher(home, self.state.setdefault("kimi", {})),
         }
         self._errors: dict = {}
 
@@ -886,6 +1248,31 @@ class Watchers:
                 self.log(f"fetch_recent agy: {e}")
         agy_turns.sort(key=lambda pair: pair[0])
         out.extend(item for _, item in agy_turns[-limit_per_source:])
+
+        # 3) Ollama
+        ow = self.items.get("ollama")
+        if ow and hasattr(ow, "fetch_recent"):
+            try:
+                out.extend(ow.fetch_recent(limit=limit_per_source))
+            except Exception as e:
+                self.log(f"fetch_recent ollama: {e}")
+
+        # 4) DeepSeek Harness
+        dw = self.items.get("deepseek")
+        if dw and hasattr(dw, "fetch_recent"):
+            try:
+                out.extend(dw.fetch_recent(limit=limit_per_source))
+            except Exception as e:
+                self.log(f"fetch_recent deepseek: {e}")
+
+        # 5) Kimi Desktop
+        kw = self.items.get("kimi")
+        if kw and hasattr(kw, "fetch_recent"):
+            try:
+                out.extend(kw.fetch_recent(limit=limit_per_source))
+            except Exception as e:
+                self.log(f"fetch_recent kimi: {e}")
+
         return out
 
     def save(self) -> None:

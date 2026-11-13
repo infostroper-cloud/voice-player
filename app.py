@@ -730,7 +730,7 @@ TTS_RETRY_DELAY_S = 2.0
 TTS_AUTO_RETRY     = 3      # авто-повтор упавших по таймауту реплик (самолечение при сбое сети)
 TTS_AUTO_RETRY_BASE_S = 20 # задержка авто-повтора нарастает: 20с, 40с, 60с (предохранитель от шторма)
 POLL_BOARD_INTERVAL_S = 2.5
-AI_SOURCES = {"antigravity", "claude-code", "codex", "cursor", "gemini"}   # реплики нейросетей (а не команды)
+AI_SOURCES = {"antigravity", "claude-code", "codex", "cursor", "gemini", "ollama", "deepseek", "kimi", "perplexity", "cline", "aider"}   # реплики нейросетей (а не команды)
 PREFS_FILE  = Path.home() / ".voice-player-prefs.json"
 SAVED_FILE  = Path.home() / ".voice-player-saved.json"   # закреплённые + избранные (легаси-формат)
 SESSION_FILE = Path.home() / ".voice-player-session.json"  # вся очередь — восстанавливается при старте
@@ -6721,6 +6721,7 @@ class VoicePlayerApp:
             self._stats_items = int(getattr(self, "_stats_items", 0)) + 1
         item.played = True
         self.user_paused = False
+        self._user_scrolled_ts = 0.0 # сброс таймера ручной прокрутки при смене реплики
         self._queue_end_notified = False
         self._prefetch_around(idx)                 # прогреть следующую, пока играет текущая
         self._apply_source_rate(item)

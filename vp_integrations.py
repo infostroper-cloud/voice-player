@@ -433,6 +433,8 @@ def _is_installed(tool_id: str, home: Path) -> bool:
                 or (home / ".config/gh/extensions/gh-copilot").exists())
     if tool_id == "ollama":
         return ((home / "AppData/Local/Programs/Ollama").exists()
+                or (home / "AppData/Local/Ollama").exists()
+                or (home / ".ollama").exists()
                 or bool(shutil.which("ollama")))
     if tool_id == "vscode":
         vscode_paths = [
@@ -463,12 +465,15 @@ def _is_installed(tool_id: str, home: Path) -> bool:
         kimi_paths = [
             home / "AppData/Local/Programs/kimi-desktop/Kimi.exe",
             home / "AppData/Local/Programs/kimi-desktop",
+            home / "AppData/Roaming/kimi-desktop",
             home / "AppData/Roaming/Kimi",
+            home / ".kimi-webbridge",
             Path("/Applications/Kimi.app"),
         ]
         return any(p.exists() for p in kimi_paths) or bool(shutil.which("kimi"))
     if tool_id == "deepseek":
         dsh_paths = [
+            home / ".dsh",
             home / "AppData/Local/Programs/DeepSeek Harness",
             home / "AppData/Local/Programs/DeepSeek Harness/DeepSeek Harness.exe",
             home / "AppData/Roaming/@deepseek-ai",
