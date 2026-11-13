@@ -2223,6 +2223,7 @@ class VoicePlayerApp:
         self.var_show_text = tk.BooleanVar(value=self.prefs.get("show_text_panel", True))
         self.var_show_queue = tk.BooleanVar(value=self.prefs.get("show_queue", True))
         self.var_autoscroll = tk.BooleanVar(value=self.prefs.get("autoscroll", True))
+        self.var_close_to_tray = tk.BooleanVar(value=self.prefs.get("close_to_tray", True))
         self.var_newest_first = tk.BooleanVar(value=self.prefs.get("newest_first", True))
         self.var_model     = tk.StringVar(value=self.prefs.get("whisper_model", WHISPER_MODEL_SIZE))
         self.var_translate = tk.BooleanVar(value=self.prefs.get("translate_en", False))
@@ -2552,6 +2553,7 @@ class VoicePlayerApp:
                 "show_queue": self.var_show_queue.get(),
                 "speak_author": self.var_speak_author.get(),
                 "autoscroll": self.var_autoscroll.get(),
+                "close_to_tray": self.var_close_to_tray.get() if hasattr(self, "var_close_to_tray") else True,
                 "newest_first": self.var_newest_first.get(),
                 "lang": self.var_lang.get() if hasattr(self, "var_lang") else "en",
                 "whisper_model": self.var_model.get(),
@@ -5088,16 +5090,18 @@ class VoicePlayerApp:
                         command=self._save_prefs).grid(row=0, column=0, columnspan=2, sticky="w")
         ttk.Checkbutton(t1, text=vp_i18n.t("opt_autoscroll"), variable=self.var_autoscroll,
                         command=self._save_prefs).grid(row=1, column=0, columnspan=2, sticky="w", pady=(4, 0))
+        ttk.Checkbutton(t1, text=vp_i18n.t("opt_close_to_tray"), variable=self.var_close_to_tray,
+                        command=self._save_prefs).grid(row=2, column=0, columnspan=2, sticky="w", pady=(4, 0))
         ttk.Checkbutton(t1, text=vp_i18n.t("opt_autoclip"), variable=self.var_autoclip,
-                        command=self._on_autoclip).grid(row=2, column=0, columnspan=2, sticky="w", pady=(4, 0))
+                        command=self._on_autoclip).grid(row=3, column=0, columnspan=2, sticky="w", pady=(4, 0))
         ttk.Checkbutton(t1, text=vp_i18n.t("opt_speak_author"), variable=self.var_speak_author,
-                        command=self._on_speak_author).grid(row=3, column=0, columnspan=2, sticky="w", pady=(4, 0))
+                        command=self._on_speak_author).grid(row=4, column=0, columnspan=2, sticky="w", pady=(4, 0))
         ttk.Checkbutton(t1, text=vp_i18n.t("opt_rate_per_source"), variable=self.var_rate_per_source,
-                        command=self._save_prefs).grid(row=4, column=0, columnspan=2, sticky="w", pady=(4, 0))
+                        command=self._save_prefs).grid(row=5, column=0, columnspan=2, sticky="w", pady=(4, 0))
         ttk.Checkbutton(t1, text=vp_i18n.t("opt_newest_first"), variable=self.var_newest_first,
                         command=lambda: (self._save_prefs(), self._render_list())).grid(
             row=50, column=0, columnspan=2, sticky="w", pady=(10, 0))
-        ttk.Label(t1, text=vp_i18n.t("opt_sleep_timer")).grid(row=5, column=0, sticky="w", pady=(10, 0))
+        ttk.Label(t1, text=vp_i18n.t("opt_sleep_timer")).grid(row=6, column=0, sticky="w", pady=(10, 0))
         off_lbl = vp_i18n.t("off")
         m_lbl = vp_i18n.t("min_short")
         cur_slp = str(self.var_sleep.get()).strip()
@@ -7475,6 +7479,8 @@ class VoicePlayerApp:
     def _setup_tray(self):
         if not IS_WIN:
             return
+        if getattr(self, "_tray", None):
+            return
         try:
             import pystray
         except Exception as e:
@@ -7484,9 +7490,10 @@ class VoicePlayerApp:
         except Exception as e:
             log_line(f"tray icon draw error: {e}"); return
         menu = pystray.Menu(
-            pystray.MenuItem("Показать", lambda *a: self.root.after(0, self._tray_show), default=True),
+            pystray.MenuItem("Показать VoicePlayer", lambda *a: self.root.after(0, self._tray_show), default=True),
             pystray.MenuItem("Пауза / продолжить", lambda *a: self.root.after(0, self.action_toggle)),
-            pystray.MenuItem("Следующая", lambda *a: self.root.after(0, self.action_next)),
+            pystray.MenuItem("Следующая реплика", lambda *a: self.root.after(0, self.action_next)),
+            pystray.Menu.SEPARATOR,
             pystray.MenuItem("Выход", lambda *a: self.root.after(0, self._tray_quit)),
         )
         try:
@@ -7724,7 +7731,7 @@ class VoicePlayerApp:
             pass
         hidden = self.root.state() != "normal"
         vp_updater.restart(APP_DIR, ["--background"] if hidden else [])
-        self.on_close()
+        self.exit_app()
 
     def _is_supporter(self) -> bool:
         return verify_supporter_key(getattr(self, "_supporter_key", ""))
@@ -8245,11 +8252,8 @@ class VoicePlayerApp:
                   style="Dim.TLabel", justify="left").pack(anchor="w", pady=(2, 0))
 
     def _tray_quit(self):
-        try:
-            if self._tray: self._tray.stop()
-        except Exception:
-            pass
-        self.on_close()
+        """Полный выход из программы через контекстное меню трея (правый клик -> Выход)."""
+        self.exit_app()
 
     def _notify(self, title, msg):
         if self._dnd_active():        # «не беспокоить»/тихие часы — без всплывающих уведомлений
@@ -9156,6 +9160,34 @@ class VoicePlayerApp:
         ttk.Button(w, text=vp_i18n.t("close"), style="Primary.TButton", command=w.destroy).pack(pady=10)
 
     def on_close(self):
+        """Обработка нажатия на крестик окна: свернуть в системный трей вместо завершения."""
+        if getattr(self, "var_close_to_tray", None) and self.var_close_to_tray.get() and IS_WIN:
+            if not getattr(self, "_tray", None):
+                self._setup_tray()
+            if getattr(self, "_tray", None):
+                self._minimize_to_tray()
+                return
+        self.exit_app()
+
+    def _minimize_to_tray(self):
+        """Спрятать главное окно в трей с подсказкой при первом сворачивании."""
+        try:
+            self._save_prefs()
+            self._save_session()
+            if self.mini is not None and self.mini.winfo_exists():
+                self._exit_mini()
+            self.root.withdraw()
+            if not getattr(self, "_tray_notified_once", False):
+                self._tray_notified_once = True
+                self._notify(
+                    "VoicePlayer",
+                    "Программа свёрнута в системный трей.\nЧтобы полностью выйти, нажмите правой кнопкой мыши по значку в трее и выберите «Выход»."
+                )
+        except Exception as e:
+            log_line(f"minimize to tray error: {e}")
+
+    def exit_app(self):
+        """Полное и безусловное завершение работы VoicePlayer."""
         global _instance_mutex
         vp_updater.mark_healthy(APP_DIR)   # штатный выход: версия рабочая, даже если окно открывали ненадолго
         self._save_prefs()
@@ -9175,7 +9207,10 @@ class VoicePlayerApp:
             else: self.player.stop()
         except Exception: pass
         try:
-            if getattr(self, "_tray", None): self._tray.stop()
+            if getattr(self, "_tray", None):
+                t = self._tray
+                self._tray = None
+                t.stop()
         except Exception: pass
         try:
             srv = getattr(self, "http_srv", None)
