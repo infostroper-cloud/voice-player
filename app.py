@@ -3974,9 +3974,21 @@ class VoicePlayerApp:
                                     highlightthickness=0, cursor="hand2", undo=True,
                                     font=self.text_font, padx=14, pady=12, spacing1=2, spacing3=4)
         self.text_widget.grid(row=0, column=0, sticky="nsew")
-        text_sb = ttk.Scrollbar(text_wrap, orient="vertical", command=self.text_widget.yview)
+        def _on_manual_scroll(*_):
+            self._user_scrolled_ts = time.time()
+
+        text_sb = ttk.Scrollbar(text_wrap, orient="vertical",
+                                command=lambda *args: (_on_manual_scroll(), self.text_widget.yview(*args)))
         text_sb.grid(row=0, column=1, sticky="ns")
         self.text_widget.configure(yscrollcommand=text_sb.set)
+        self.text_widget.bind("<MouseWheel>", _on_manual_scroll, add="+")
+        self.text_widget.bind("<Button-4>", _on_manual_scroll, add="+")
+        self.text_widget.bind("<Button-5>", _on_manual_scroll, add="+")
+        self.text_widget.bind("<Prior>", _on_manual_scroll, add="+")
+        self.text_widget.bind("<Next>", _on_manual_scroll, add="+")
+        self.text_widget.bind("<Up>", _on_manual_scroll, add="+")
+        self.text_widget.bind("<Down>", _on_manual_scroll, add="+")
+        self.text_widget.bind("<B1-Motion>", _on_manual_scroll, add="+")
         self.text_widget.tag_configure("speaking", background=sel, foreground=ink)
         self.text_widget.tag_configure("speaking_word", background=signal, foreground=pri_fg)
         self.text_widget.tag_configure("entity", foreground=signal, underline=True)
@@ -5401,6 +5413,38 @@ class VoicePlayerApp:
         else:
             self._set_status("авто-озвучка буфера выключена", ok=True)
 
+    def _detect_active_window_author(self) -> str:
+        """Определить автора по заголовку активного окна Windows в момент копирования."""
+        if os.name != "nt":
+            return "Буфер обмена"
+        try:
+            import ctypes
+            user32 = ctypes.windll.user32
+            hwnd = user32.GetForegroundWindow()
+            if hwnd:
+                length = user32.GetWindowTextLengthW(hwnd)
+                if length > 0:
+                    buff = ctypes.create_unicode_buffer(length + 1)
+                    user32.GetWindowTextW(hwnd, buff, length + 1)
+                    title = buff.value.lower()
+                    if "deepseek" in title:
+                        return "DeepSeek"
+                    if "kimi" in title:
+                        return "Kimi"
+                    if "comet" in title or "perplexity" in title:
+                        return "Perplexity Comet"
+                    if "ollama" in title:
+                        return "Ollama"
+                    if "chatgpt" in title:
+                        return "ChatGPT"
+                    if "claude" in title:
+                        return "Claude"
+                    if "antigravity" in title:
+                        return "Antigravity"
+        except Exception:
+            pass
+        return "Буфер обмена"
+
     def _poll_clipboard(self):
         if not self.var_autoclip.get():
             return
@@ -5409,8 +5453,11 @@ class VoicePlayerApp:
         clip = (clip or "").strip()
         if clip and clip != self._last_clip and len(clip) > 1 and not clip.startswith("http"):
             self._last_clip = clip
-            self.enqueue(source="manual", author="Буфер обмена",
-                         time_str=time.strftime("%H:%M"), text=clip, dedup=False)
+            author = self._detect_active_window_author()
+            item = self.enqueue(source="manual", author=author,
+                                time_str=time.strftime("%H:%M"), text=clip, dedup=True)
+            if item and self.var_autoplay.get():
+                self._speak_now(item, author.lower())
 
     def _toggle_mute_author(self):
         idx = self._selected_idx()
@@ -5768,6 +5815,7 @@ class VoicePlayerApp:
 
     def _on_text_click(self, event):
         """Клик по предложению в панели текста → перемотка к его таймкоду."""
+        self._user_scrolled_ts = 0.0 # сброс таймера ручной прокрутки: клик по фразе возвращает авто-фокус
         try:
             idx = self.text_widget.index(f"@{event.x},{event.y}")
         except Exception:
@@ -5989,7 +6037,12 @@ class VoicePlayerApp:
             new.configure(bg=self.col_signal, fg=self._on_signal_fg(self.col_signal))
         self._hl_cell = new
 
-    def _panel_see(self, char: int):
+    def _panel_see(self, char: int, force: bool = False):
+        if not force:
+            if hasattr(self, "var_autoscroll") and not self.var_autoscroll.get():
+                return
+            if time.time() - getattr(self, "_user_scrolled_ts", 0.0) < 8.0:
+                return
         for seg in getattr(self, "_panel_segs", []):
             if seg["a"] <= char < seg["b"]:
                 if seg["kind"] == "text":
@@ -8618,9 +8671,16 @@ class VoicePlayerApp:
             if v2: user32.RegisterHotKey(None, 2, m2, v2)
             if v3: user32.RegisterHotKey(None, 3, m3, v3)
 
-            # Также всегда регистрируем Ctrl+Shift+S / Ctrl+Shift+D как резервные
-            user32.RegisterHotKey(None, 4, 0x4000 | 0x0002 | 0x0004, 0x53) # Ctrl+Shift+S
-            user32.RegisterHotKey(None, 5, 0x4000 | 0x0002 | 0x0004, 0x44) # Ctrl+Shift+D
+            # Резервные регистрируем ТОЛЬКО если пользователь настроил другие клавиши,
+            # чтобы не было двойной регистрации одной и той же комбинации!
+            fallback_speak_mod, fallback_speak_vk = (0x4000 | 0x0002 | 0x0004), 0x53 # Ctrl+Shift+S
+            if (m1, v1) != (fallback_speak_mod, fallback_speak_vk):
+                try: user32.RegisterHotKey(None, 4, fallback_speak_mod, fallback_speak_vk)
+                except Exception: pass
+            fallback_dict_mod, fallback_dict_vk = (0x4000 | 0x0002 | 0x0004), 0x44 # Ctrl+Shift+D
+            if (m2, v2) != (fallback_dict_mod, fallback_dict_vk):
+                try: user32.RegisterHotKey(None, 5, fallback_dict_mod, fallback_dict_vk)
+                except Exception: pass
             log_line(f"Global hotkeys reloaded: speak={spk}, dictate={dic}, toggle={tog}")
         except Exception as e:
             log_line(f"Error reloading hotkeys: {e}")
@@ -8747,18 +8807,6 @@ class VoicePlayerApp:
                                     self.root.after(80, lambda: self._speak_clipboard(copied_hint=True))
                                 else:
                                     self._last_ctrl_c_ts = now
-                        elif vk == 0x44:   # Клавиша 'D' (Ctrl+Shift+D -> диктовка)
-                            ctrl_down  = (user32.GetAsyncKeyState(0x11) & 0x8000) != 0
-                            shift_down = (user32.GetAsyncKeyState(0x10) & 0x8000) != 0
-                            alt_down   = (user32.GetAsyncKeyState(0x12) & 0x8000) != 0
-                            if ctrl_down and shift_down and not alt_down:
-                                self.root.after(0, self._toggle_dictate)
-                        elif vk == 0x53:   # Клавиша 'S' (Ctrl+Shift+S -> озвучить выделение)
-                            ctrl_down  = (user32.GetAsyncKeyState(0x11) & 0x8000) != 0
-                            shift_down = (user32.GetAsyncKeyState(0x10) & 0x8000) != 0
-                            alt_down   = (user32.GetAsyncKeyState(0x12) & 0x8000) != 0
-                            if ctrl_down and shift_down and not alt_down:
-                                threading.Thread(target=self._speak_selection_worker, daemon=True, name="speak-sel").start()
                 except Exception:
                     pass
                 return user32.CallNextHookEx(None, nCode, wParam, lParam)
@@ -8818,33 +8866,45 @@ class VoicePlayerApp:
 
     def _speak_selection_worker(self):
         """Интеллектуальный захват выделения:
-        1) Ждёт отпускания Alt/Win/S, чтобы активное приложение не получало Ctrl+Alt+C.
-        2) Посылает чистое Ctrl+C со сканкодами 0x1D и 0x2E (совместимо с Electron/DeepSeek/Comet/Chrome/Notepad).
-        3) Отслеживает реальное обновление буфера через GetClipboardSequenceNumber.
-        4) Озвучивает текст без задержек."""
+        1) Дебаунс: защита от многократных вызовов при зажатии клавиш.
+        2) Ждёт отпускания Alt/Win/Shift/S, чтобы активное приложение не получало Ctrl+Shift+C / Ctrl+Alt+C.
+        3) Посылает чистое Ctrl+C со сканкодами 0x1D и 0x2E (совместимо с Electron/DeepSeek/Comet/Chrome/Notepad/Antigravity).
+        4) Отслеживает реальное обновление буфера через GetClipboardSequenceNumber и сравнение содержимого.
+        5) Если ничего не скопировалось, НЕ озвучивает старый буфер, а предупреждает пользователя."""
+        now = time.time()
+        if now - getattr(self, "_last_speak_sel_ts", 0.0) < 0.9:
+            return
+        self._last_speak_sel_ts = now
+
         copied = False
+        new_text = ""
         try:
             import ctypes
             user32 = ctypes.windll.user32
 
-            # 1. Ждём, пока пользователь отпустит физические клавиши Alt, Win, S (до 350мс)
+            # 1. Ждём, пока пользователь отпустит физические клавиши Alt, Win, Shift, S (до 350мс)
             t0 = time.time()
             had_alt = False
             while time.time() - t0 < 0.35:
-                alt_down = (user32.GetAsyncKeyState(0x12) & 0x8000) != 0
-                win_down = ((user32.GetAsyncKeyState(0x5B) & 0x8000) != 0 or
-                            (user32.GetAsyncKeyState(0x5C) & 0x8000) != 0)
-                s_down   = (user32.GetAsyncKeyState(0x53) & 0x8000) != 0
+                alt_down   = (user32.GetAsyncKeyState(0x12) & 0x8000) != 0
+                win_down   = ((user32.GetAsyncKeyState(0x5B) & 0x8000) != 0 or
+                              (user32.GetAsyncKeyState(0x5C) & 0x8000) != 0)
+                shift_down = (user32.GetAsyncKeyState(0x10) & 0x8000) != 0
+                s_down     = (user32.GetAsyncKeyState(0x53) & 0x8000) != 0
                 if alt_down:
                     had_alt = True
-                if not alt_down and not win_down and not s_down:
+                if not alt_down and not win_down and not shift_down and not s_down:
                     break
                 time.sleep(0.02)
 
+            old_clip = (self._clipboard_rich() or "").strip()
             seq_before = user32.GetClipboardSequenceNumber() if hasattr(user32, "GetClipboardSequenceNumber") else 0
 
-            # 2. Гарантированно отпускаем Alt и Win
+            # 2. Гарантированно отпускаем Shift, Alt, Win, S в системе
             KEYEVENTF_KEYUP = 0x0002
+            user32.keybd_event(0x10, 0x2A, KEYEVENTF_KEYUP, 0) # Shift
+            user32.keybd_event(0xA0, 0x2A, KEYEVENTF_KEYUP, 0) # LShift
+            user32.keybd_event(0xA1, 0x36, KEYEVENTF_KEYUP, 0) # RShift
             user32.keybd_event(0x12, 0x38, KEYEVENTF_KEYUP, 0) # Alt
             user32.keybd_event(0xA4, 0x38, KEYEVENTF_KEYUP, 0) # LAlt
             user32.keybd_event(0xA5, 0x38, KEYEVENTF_KEYUP, 0) # RAlt
@@ -8859,36 +8919,53 @@ class VoicePlayerApp:
                 time.sleep(0.01)
                 user32.keybd_event(0x1B, 0x01, KEYEVENTF_KEYUP, 0) # Escape up
 
-            time.sleep(0.03)
+            time.sleep(0.04)
 
-            # 3. Отправляем Ctrl+C со сканкодами
+            # 3. Отправляем чистое Ctrl+C со сканкодами (Shift уже отпущен!)
             user32.keybd_event(0x11, 0x1D, 0, 0)                # Ctrl down
+            time.sleep(0.02)
             user32.keybd_event(0x43, 0x2E, 0, 0)                # C down
-            time.sleep(0.03)
+            time.sleep(0.04)
             user32.keybd_event(0x43, 0x2E, KEYEVENTF_KEYUP, 0)  # C up
+            time.sleep(0.02)
             user32.keybd_event(0x11, 0x1D, KEYEVENTF_KEYUP, 0)  # Ctrl up
 
-            # 4. Ждём обновления буфера обмена (до 300мс)
+            # 4. Ждём обновления буфера обмена (до 400мс)
             t1 = time.time()
-            while time.time() - t1 < 0.30:
-                if hasattr(user32, "GetClipboardSequenceNumber"):
-                    if user32.GetClipboardSequenceNumber() != seq_before:
+            while time.time() - t1 < 0.40:
+                cur_seq = user32.GetClipboardSequenceNumber() if hasattr(user32, "GetClipboardSequenceNumber") else 0
+                if cur_seq != seq_before:
+                    candidate = (self._clipboard_rich() or "").strip()
+                    if candidate and candidate != old_clip:
                         copied = True
+                        new_text = candidate
                         break
                 time.sleep(0.02)
+
+            if not copied:
+                # Вторичная проверка: возможно seq number не изменился, но текст сменился
+                candidate = (self._clipboard_rich() or "").strip()
+                if candidate and candidate != old_clip:
+                    copied = True
+                    new_text = candidate
         except Exception as e:
             log_line(f"speak selection error: {e}")
 
-        self.root.after(0, lambda: self._speak_clipboard(copied_hint=copied))
+        self.root.after(0, lambda: self._speak_clipboard(copied_hint=copied, captured_text=new_text))
 
-    def _speak_clipboard(self, copied_hint: bool = True):
-        txt = (self._clipboard_rich() or "").strip()
-        if not txt:
-            self._set_status("Ничего не выделено — выделите текст и нажмите Ctrl+Alt+S (или дважды Ctrl+C)", ok=False)
+    def _speak_clipboard(self, copied_hint: bool = True, captured_text: str = ""):
+        txt = (captured_text or self._clipboard_rich() or "").strip()
+        if not copied_hint:
+            self._set_status("Ничего не выделено — выделите текст и нажмите хоткей (или дважды Ctrl+C)", ok=False)
             return
+        if not txt:
+            self._set_status("Буфер обмена пуст — выделите текст", ok=False)
+            return
+        self._last_clip = txt
         item = self.enqueue(source="manual", author="Выделенный текст",
-                            time_str=time.strftime("%H:%M"), text=txt, dedup=False)
-        self._speak_now(item, "выделенный текст")
+                            time_str=time.strftime("%H:%M"), text=txt, dedup=True)
+        if item:
+            self._speak_now(item, "выделенный текст")
 
     def _tick(self):
         try:

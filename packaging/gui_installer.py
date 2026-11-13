@@ -288,11 +288,35 @@ class ClassicInstallerWizard:
                 pass
 
         _apply_dark_titlebar(self.root)
+        self.root.after(30, self._apply_taskbar_icon)
+        self.root.after(120, self._apply_taskbar_icon)
+        self.root.bind("<Map>", lambda e: self._apply_taskbar_icon())
 
         # Центрирование
         self.root.update_idletasks()
         sw, sh = self.root.winfo_screenwidth(), self.root.winfo_screenheight()
         self.root.geometry(f"620x510+{(sw - 620) // 2}+{(sh - 510) // 2}")
+
+    def _apply_taskbar_icon(self):
+        """Гарантированно установить иконку программы на панели задач Windows (WM_SETICON)."""
+        if sys.platform != "win32" or not getattr(self, "installer_ico", None):
+            return
+        try:
+            import ctypes
+            user32 = ctypes.windll.user32
+            wid = self.root.winfo_id()
+            hwnd = user32.GetAncestor(wid, 2) or wid
+            IMAGE_ICON = 1
+            LR_LOADFROMFILE = 0x0010
+            hicon_big = user32.LoadImageW(None, str(self.installer_ico), IMAGE_ICON, 32, 32, LR_LOADFROMFILE)
+            hicon_small = user32.LoadImageW(None, str(self.installer_ico), IMAGE_ICON, 16, 16, LR_LOADFROMFILE)
+            WM_SETICON = 0x0080
+            if hicon_big:
+                user32.SendMessageW(hwnd, WM_SETICON, 1, hicon_big)
+            if hicon_small:
+                user32.SendMessageW(hwnd, WM_SETICON, 0, hicon_small)
+        except Exception:
+            pass
 
         self.current_page = 0
         default_folder = Path(os.environ.get("LOCALAPPDATA", Path.home())) / "Programs" / "VoicePlayer"
@@ -707,20 +731,38 @@ class ClassicInstallerWizard:
             dest = Path(self.var_dest.get().strip())
             launch_cmd = dest / "launch.cmd"
             launch_pyw = dest / "launch.pyw"
-            py = _find_system_python() or sys.executable
-            pyw = str(Path(py).with_name("pythonw.exe")) if Path(py).with_name("pythonw.exe").is_file() else py
             try:
-                flags = 0x00000008 if sys.platform == "win32" else 0  # DETACHED_PROCESS
                 if launch_cmd.is_file():
-                    subprocess.Popen(["cmd.exe", "/c", str(launch_cmd)], creationflags=flags)
+                    try:
+                        os.startfile(str(launch_cmd))
+                    except Exception:
+                        subprocess.Popen(["cmd.exe", "/c", str(launch_cmd)], cwd=str(dest),
+                                         creationflags=0x00000008 | 0x00000200)
                 elif launch_pyw.is_file():
-                    subprocess.Popen([pyw, str(launch_pyw)], cwd=str(dest), creationflags=flags)
+                    py = _find_system_python() or sys.executable
+                    pyw = str(Path(py).with_name("pythonw.exe")) if Path(py).with_name("pythonw.exe").is_file() else py
+                    try:
+                        os.startfile(str(launch_pyw))
+                    except Exception:
+                        subprocess.Popen([pyw, str(launch_pyw)], cwd=str(dest),
+                                         creationflags=0x00000008 | 0x00000200)
             except Exception:
                 pass
         self.root.destroy()
 
 
 def main():
+    if sys.platform == "win32":
+        try:
+            import ctypes
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("VoicePlayer.Setup.Installer")
+        except Exception:
+            pass
+        try:
+            ctypes.windll.shcore.SetProcessDpiAwareness(1)
+        except Exception:
+            try: ctypes.windll.user32.SetProcessDPIAware()
+            except Exception: pass
     args_upper = [a.upper() for a in sys.argv[1:]]
     if "/SILENT" in args_upper or "/VERYSILENT" in args_upper:
         default_folder = Path(os.environ.get("LOCALAPPDATA", Path.home())) / "Programs" / "VoicePlayer"
