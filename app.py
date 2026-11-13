@@ -2300,6 +2300,8 @@ class VoicePlayerApp:
         self._start_global_hotkey()   # Ctrl+Alt+S — озвучить выделенный текст в любом окне
         self._setup_dnd()             # перетаскивание аудиофайлов в окно
         self._setup_tray()            # иконка в системном трее
+        if IS_WIN:
+            self.root.after(1200, lambda: vp_updater.register_windows_uninstaller(APP_VERSION))
         self._restore_session()       # вся очередь прошлого сеанса (или легаси: закреплённые/избранные)
         self.root.after(15000, self._autosave_session)   # периодически пересохранять очередь
         self.root.after(2500, self._refresh_ai_badge)    # найти установленные нейросети
