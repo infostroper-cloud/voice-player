@@ -2252,6 +2252,15 @@ class VoicePlayerApp:
         self._stats_items = int(self.prefs.get("stats_items", 0))
         self._supporter_key = str(self.prefs.get("supporter_key", ""))
         self._last_support_prompt_ts = float(self.prefs.get("last_support_prompt_ts", 0.0))
+        try:
+            import vp_telemetry
+            self.telemetry = vp_telemetry.TelemetryManager(
+                self.prefs, APP_VERSION, is_supporter_fn=self._is_supporter
+            )
+            self.telemetry.record_session_start()
+        except Exception as e:
+            self.telemetry = None
+            log_line(f"telemetry init: {e}")
         # Интернационализация
         saved_lang = self.prefs.get("lang") or vp_i18n.detect_system_lang()
         vp_i18n.set_lang(saved_lang)
@@ -2305,6 +2314,7 @@ class VoicePlayerApp:
         self._restore_session()       # вся очередь прошлого сеанса (или легаси: закреплённые/избранные)
         self.root.after(15000, self._autosave_session)   # периодически пересохранять очередь
         self.root.after(2500, self._refresh_ai_badge)    # найти установленные нейросети
+        self.root.after(3500, self._trigger_telemetry_ping)
         self.root.after(45000, self._maybe_show_support_reminder)
 
         self.watchers = vp_watchers.Watchers(Path.home() / ".voice-player" / "watchers.json", log=log_line)
@@ -7530,6 +7540,22 @@ class VoicePlayerApp:
         else:
             t_str = f"{secs}s"
         return vp_i18n.t("stats_spoken_for_you", time=t_str, count=items)
+
+    def _trigger_telemetry_ping(self):
+        t = getattr(self, "telemetry", None)
+        if not t:
+            return
+        try:
+            sources = [it.source for it in getattr(self, "queue_items", [])[:20] if hasattr(it, "source")]
+            t.ping_async(
+                total_seconds=getattr(self, "_stats_seconds", 0.0),
+                total_items=getattr(self, "_stats_items", 0),
+                active_sources=sources,
+                voice=getattr(self, "_voice", "piper:dmitri"),
+                lang=self.var_lang.get() if hasattr(self, "var_lang") else "ru"
+            )
+        except Exception as e:
+            log_line(f"telemetry ping: {e}")
 
     def _maybe_show_support_reminder(self):
         """Ненавязчивое окно в стиле ненавязчивой поддержки: не чаще раза в 7 дней после ощутимой пользы,
