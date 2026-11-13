@@ -35,7 +35,18 @@ def home_dir() -> Path:
     env = os.environ.get("VOICE_PLAYER_HOME")
     if env:
         return Path(env).resolve()
-    return Path.home() / ".voice-player"
+    if os.name == "nt":
+        lad = os.environ.get("LOCALAPPDATA")
+        if lad:
+            win_prog = Path(lad) / "Programs" / "VoicePlayer"
+            if win_prog.exists() or (win_prog / "versions").exists():
+                return win_prog
+    legacy = Path.home() / ".voice-player"
+    if legacy.exists():
+        return legacy
+    if os.name == "nt" and os.environ.get("LOCALAPPDATA"):
+        return Path(os.environ["LOCALAPPDATA"]) / "Programs" / "VoicePlayer"
+    return legacy
 
 
 def versions_dir() -> Path:
@@ -445,12 +456,29 @@ Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
     ($_.CommandLine -like "*voice-player*" -or $_.CommandLine -like "*VoicePlayer*") -and $_.ProcessId -ne $PID 
 } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
 
-# 3. Удаляем ярлыки с Рабочего стола и меню Пуск
-foreach ($d in @([Environment]::GetFolderPath('Desktop'), [Environment]::GetFolderPath('Programs'))) {
-    $lnk = Join-Path $d "VoicePlayer.lnk"
-    if (Test-Path $lnk) { Remove-Item $lnk -Force -ErrorAction SilentlyContinue }
-    $un_lnk = Join-Path $d "Удалить VoicePlayer.lnk"
-    if (Test-Path $un_lnk) { Remove-Item $un_lnk -Force -ErrorAction SilentlyContinue }
+# 3. Удаляем ярлыки с Рабочего стола и меню Пуск (учитываем OneDrive, Public Desktop и все профили)
+$dirsToClean = @(
+    [Environment]::GetFolderPath('Desktop'),
+    [Environment]::GetFolderPath('CommonDesktopDirectory'),
+    (Join-Path $env:USERPROFILE "Desktop"),
+    (Join-Path $env:USERPROFILE "OneDrive\Desktop"),
+    "C:\Users\Public\Desktop",
+    [Environment]::GetFolderPath('Programs'),
+    [Environment]::GetFolderPath('CommonPrograms'),
+    (Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs"),
+    (Join-Path $env:ProgramData "Microsoft\Windows\Start Menu\Programs")
+)
+try {
+    $regDesk = (Get-ItemProperty "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders" -ErrorAction SilentlyContinue).Desktop
+    if ($regDesk) { $dirsToClean += $regDesk }
+} catch {}
+
+foreach ($d in ($dirsToClean | Select-Object -Unique)) {
+    if ($d -and (Test-Path $d)) {
+        Get-ChildItem -Path $d -Filter "*VoicePlayer*" -Recurse -ErrorAction SilentlyContinue | ForEach-Object {
+            Remove-Item $_.FullName -Force -Recurse -ErrorAction SilentlyContinue
+        }
+    }
 }
 
 # 4. Удаляем хуки интеграции с нейросетями
@@ -501,14 +529,31 @@ def register_windows_uninstaller(version: str = "") -> None:
         ps1_file.write_text(UNINSTALL_PS1, encoding="utf-8-sig")
         cmd_file.write_text(UNINSTALL_CMD, encoding="ascii", errors="ignore")
 
+        # Ищем icon.ico во всех возможных каталогах установки
         ico = h / "icon.ico"
         if not ico.is_file():
-            best = best_installed()
-            if best and (best / "icon.ico").is_file():
-                try:
-                    shutil.copy2(best / "icon.ico", ico)
-                except Exception:
-                    pass
+            candidates = [
+                best / "icon.ico" if best else None,
+                Path(os.environ.get("LOCALAPPDATA", "")) / "Programs" / "VoicePlayer" / "icon.ico" if os.environ.get("LOCALAPPDATA") else None,
+                Path(__file__).resolve().parent / "icon.ico",
+                Path.home() / ".voice-player" / "icon.ico",
+            ]
+            for cand in candidates:
+                if cand and cand.is_file():
+                    try:
+                        shutil.copy2(cand, ico)
+                        break
+                    except Exception:
+                        pass
+        # Страхуем также копией в ~/.voice-player/icon.ico для обратной совместимости
+        legacy_dir = Path.home() / ".voice-player"
+        legacy_dir.mkdir(parents=True, exist_ok=True)
+        if ico.is_file():
+            try:
+                shutil.copy2(ico, legacy_dir / "icon.ico")
+                shutil.copy2(ps1_file, legacy_dir / "uninstall.ps1")
+            except Exception:
+                pass
 
         size_kb = 28000
         try:
@@ -557,6 +602,7 @@ def create_shortcuts(desktop: bool = True, start_menu: bool = True, auto_start: 
     dirs = []
     if desktop:
         dirs.append("[Environment]::GetFolderPath('Desktop')")
+        dirs.append("(Join-Path $env:USERPROFILE 'OneDrive\\Desktop')")
     if start_menu:
         dirs.append("[Environment]::GetFolderPath('Programs')")
     if dirs:
@@ -564,9 +610,10 @@ def create_shortcuts(desktop: bool = True, start_menu: bool = True, auto_start: 
         script = (
             f"$s = New-Object -ComObject WScript.Shell;"
             f"foreach ($d in {dirs_expr}) {{"
+            f"if ($d -and (Test-Path $d)) {{"
             f"$l = $s.CreateShortcut((Join-Path $d 'VoicePlayer.lnk'));"
             f"$l.TargetPath = '{cmd_path}'; $l.WorkingDirectory = '{str(h)}'; $l.WindowStyle = 7;"
-            f"$l.IconLocation = '{ico_path}'; $l.Save() }}"
+            f"$l.IconLocation = '{ico_path}'; $l.Save() }}}}"
         )
         try:
             subprocess.run(["powershell", "-NoProfile", "-Command", script], check=True, timeout=60, creationflags=NO_WINDOW)

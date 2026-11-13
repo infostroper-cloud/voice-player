@@ -55,11 +55,10 @@ IS_WIN = (os.name == "nt")
 IS_MAC = (sys.platform == "darwin")
 
 if IS_WIN:
-    if getattr(sys, "frozen", False):
-        try:
-            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(APP_USER_MODEL_ID)
-        except Exception:
-            pass
+    try:
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(APP_USER_MODEL_ID)
+    except Exception:
+        pass
     _winmm = ctypes.WinDLL("winmm")
     _winmm.mciSendStringW.argtypes = [ctypes.c_wchar_p, ctypes.c_wchar_p, ctypes.c_uint, ctypes.c_void_p]
     _winmm.mciSendStringW.restype = ctypes.c_uint
@@ -2704,15 +2703,14 @@ class VoicePlayerApp:
         return im.resize((size, size), Image.LANCZOS)
 
     def _apply_modern_icon(self):
-        if IS_WIN:
-            if ICON_PATH.exists():
+        if IS_WIN and ICON_PATH.exists():
+            try:
+                self.root.iconbitmap(str(ICON_PATH))
+            except Exception:
                 try:
                     self.root.iconbitmap(default=str(ICON_PATH))
                 except Exception:
                     pass
-            self.root.after(100, self._apply_win_taskbar_identity)
-            self.root.after(1000, self._apply_win_taskbar_identity)
-            return
 
         try:
             from PIL import ImageTk
@@ -2724,6 +2722,10 @@ class VoicePlayerApp:
             self.root.iconphoto(True, *self._app_icon_imgs)
         except Exception:
             pass
+
+        if IS_WIN:
+            self.root.after(100, self._apply_win_taskbar_identity)
+            self.root.after(800, self._apply_win_taskbar_identity)
 
     def _top_hwnd(self, win=None):
         if not IS_WIN:
@@ -2748,12 +2750,18 @@ class VoicePlayerApp:
             hwnd = self._top_hwnd()
         except Exception:
             return
-        stable_ico = Path.home() / ".voice-player" / "icon.ico"
-        parent_ico = Path(APP_DIR).parent / "icon.ico"
-        ico = ICON_PATH if ICON_PATH.exists() else (parent_ico if parent_ico.exists() else stable_ico)
+        lad = os.environ.get("LOCALAPPDATA", "")
+        candidates = [
+            ICON_PATH,
+            Path(APP_DIR) / "icon.ico",
+            Path(APP_DIR).parent / "icon.ico",
+            Path(lad) / "Programs" / "VoicePlayer" / "icon.ico" if lad else None,
+            Path.home() / ".voice-player" / "icon.ico",
+        ]
+        ico = next((c for c in candidates if c and c.is_file()), ICON_PATH)
         # ---- 1. Иконки окна ----
         try:
-            if ico.exists():
+            if ico and ico.exists():
                 u32 = ctypes.windll.user32
                 u32.LoadImageW.restype = wintypes.HANDLE
                 u32.LoadImageW.argtypes = [wintypes.HINSTANCE, wintypes.LPCWSTR, wintypes.UINT,
@@ -2780,8 +2788,9 @@ class VoicePlayerApp:
         # ---- 2. AppUserModelID + команда перезапуска для закрепления ----
         try:
             import uuid as _uuid
-            launch_cmd = Path.home() / ".voice-player" / "launch.cmd"
-            launcher = Path.home() / ".voice-player" / "launch.pyw"
+            prog_dir = Path(lad) / "Programs" / "VoicePlayer" if lad else None
+            launch_cmd = (prog_dir / "launch.cmd") if (prog_dir and (prog_dir / "launch.cmd").exists()) else (Path.home() / ".voice-player" / "launch.cmd")
+            launcher = (prog_dir / "launch.pyw") if (prog_dir and (prog_dir / "launch.pyw").exists()) else (Path.home() / ".voice-player" / "launch.pyw")
             gui_py = vp_updater.gui_python()
             target = launcher if launcher.exists() else (APP_DIR / "app.py")
             relaunch_cmd = str(launch_cmd) if launch_cmd.exists() else f'"{gui_py}" "{target}"'
@@ -2822,7 +2831,7 @@ class VoicePlayerApp:
             keep = []
             for pid, val in ((2, relaunch_cmd),               # RelaunchCommand
                              (4, "VoicePlayer"),              # RelaunchDisplayNameResource
-                             (3, f"{ico},0"),                 # RelaunchIconResource
+                             (3, str(ico)),                   # RelaunchIconResource (чистый .ico путь без PE-индекса)
                              (5, APP_USER_MODEL_ID)):         # ID — ставим последним
                 buf = ctypes.create_unicode_buffer(val)
                 keep.append(buf)

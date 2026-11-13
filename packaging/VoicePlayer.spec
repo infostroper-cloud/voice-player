@@ -1,4 +1,4 @@
-# -*- mode: python ; coding: utf-8 -*-
+﻿# -*- mode: python ; coding: utf-8 -*-
 # PyInstaller spec для VoicePlayer.
 #
 #   Обычная (лёгкая) сборка:   pyinstaller packaging/VoicePlayer.spec
@@ -86,8 +86,8 @@ if sys.platform == "darwin":
         info_plist={
             "CFBundleName": "VoicePlayer",
             "CFBundleDisplayName": "VoicePlayer",
-            "CFBundleVersion": "1.2.3",
-            "CFBundleShortVersionString": "1.2.3",
+            "CFBundleVersion": "1.2.4",
+            "CFBundleShortVersionString": "1.2.4",
             "NSHighResolutionCapable": "True",
             "LSMinimumSystemVersion": "11.0",
         },

@@ -1,4 +1,4 @@
-"""Классический многостраничный графический установщик VoicePlayer-Setup-<ver>.exe.
+﻿"""Классический многостраничный графический установщик VoicePlayer-Setup-<ver>.exe.
 
 Шаги мастера установки:
 1. Лицензионное соглашение (EULA / MIT License) с переключателями принятия условий.
@@ -27,7 +27,7 @@ from tkinter import ttk, filedialog, messagebox
 NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 PY_INSTALLER_URL = "https://www.python.org/ftp/python/3.12.8/python-3.12.8-amd64.exe"
 
-APP_VERSION_DEFAULT = "1.2.3"
+APP_VERSION_DEFAULT = "1.2.4"
 
 LICENSE_TEXT = """ЛИЦЕНЗИОННОЕ СОГЛАШЕНИЕ С КОНЕЧНЫМ ПОЛЬЗОВАТЕЛЕМ (EULA)
 для программного обеспечения «VoicePlayer» (версия 1.2.x и последующие)
