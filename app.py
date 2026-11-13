@@ -2546,17 +2546,31 @@ class VoicePlayerApp:
 
     def _guard_sash(self, _e=None):
         """Не давать левой колонке очереди схлопнуться в 0px при первичной раскладке PanedWindow."""
+        if getattr(self, "_in_guard_sash", False):
+            return
+        self._in_guard_sash = True
         try:
-            if len(self.body.panes()) >= 2 and self.body.winfo_width() >= 600:
+            if hasattr(self, "body") and len(self.body.panes()) >= 2 and self.body.winfo_width() >= 600:
                 cur = int(self.body.sashpos(0))
-                if cur < 420:
+                if 0 <= cur < 400:
                     saved = self.prefs.get("sashes") or []
                     target = int(saved[0]) if (saved and 420 <= int(saved[0]) <= 720) else 480
                     self.body.sashpos(0, target)
         except Exception:
             pass
+        finally:
+            self._in_guard_sash = False
 
     # ------------------ UI ------------------
+    @staticmethod
+    def _f(size: int = 10):
+        return ("Helvetica Neue" if IS_MAC else "Segoe UI", size)
+
+    @staticmethod
+    def _f_semi(size: int = 10):
+        if IS_MAC:
+            return ("Helvetica Neue", size, "bold")
+        return ("Segoe UI Semibold", size)
     @staticmethod
     def _tt(widget, text):
         """Навесить подсказку и вернуть виджет (для цепочки .grid()/.pack())."""
@@ -3094,79 +3108,82 @@ class VoicePlayerApp:
 
     def _round_buttons(self, style, c, base_font):
         """Поднять кнопки до «эппловских» скруглённых через картинки PIL (9-slice).
-        Тихо выходит, если Pillow недоступен — остаётся плоский фолбэк."""
+        Тихо выходит, если Pillow недоступен или среда (macOS aqua) не поддерживает кастомные элементы."""
         try:
-            from PIL import Image  # noqa: F401
+            from PIL import Image, ImageTk  # noqa: F401
         except Exception:
             return
-        self._btn_imgs = []
-        gen = self._btn_gen = getattr(self, "_btn_gen", 0) + 1
-        ink, signal, panel, hairline = c["ink"], c["signal"], c["panel"], c["hairline"]
-        pri_fg = self._on_signal_fg(signal)
-        dark = str(self.var_theme.get()).lower().startswith("т") if hasattr(self, "var_theme") else True
-        W, H, R = 24, 28, 7
-        # вторичная заливка (обычные кнопки) — мягкая, с тонкой окантовкой
-        if dark:
-            sec_n, sec_h, sec_p = "#1c211f", "#262e2b", "#151918"
-        else:
-            sec_n, sec_h, sec_p = "#e9eeec", "#dce4e0", "#cfd9d4"
-        n  = self._round_img(W, H, R, sec_n, outline=hairline, ow=1, bg=panel)
-        hv = self._round_img(W, H, R, sec_h, outline=hairline, ow=1, bg=panel)
-        pr = self._round_img(W, H, R, sec_p, outline=hairline, ow=1, bg=panel)
-        sec = f"sec{gen}.button"
-        style.element_create(sec, "image", n, ("pressed", pr), ("active", hv),
-                             border=R, sticky="nsew", padding=(9, 4))
-        leaf = lambda el: [(el, {"sticky": "nsew", "children": [("Button.label", {"sticky": "nsew"})]})]
-        style.layout("TButton", leaf(sec))
-        style.configure("TButton", foreground=ink, font=base_font, anchor="center")
-        style.map("TButton", foreground=[("disabled", c["mute"]), ("active", ink)])
-        style.layout("Toggle.TButton", leaf(sec))
-        style.configure("Toggle.TButton", foreground=ink, font=base_font, anchor="center")
-        style.map("Toggle.TButton", foreground=[("disabled", c["mute"]), ("active", ink)])
-        # активная таблетка (выбранный фильтр / выбранная скорость)
-        pa_n = self._round_img(W, H, R, c["sel"], outline=signal, ow=1, bg=panel)
-        pa_h = self._round_img(W, H, R, self._shade(c["sel"], 0.08), outline=signal, ow=1, bg=panel)
-        pa_el = f"pilla{gen}.button"
-        style.element_create(pa_el, "image", pa_n, ("pressed", pa_h), ("active", pa_h),
-                             border=R, sticky="nsew", padding=(9, 4))
-        style.layout("PillActive.TButton", leaf(pa_el))
-        style.configure("PillActive.TButton", foreground=signal if dark else ink,
-                        font=("Segoe UI Semibold", 9), anchor="center")
-        style.map("PillActive.TButton", foreground=[("active", signal if dark else ink)])
-        # первичная (акцент) — мятная заливка, контрастный текст
-        pn = self._round_img(W, H, R, signal, bg=panel)
-        pp_h = self._round_img(W, H, R, self._shade(signal, -0.08), bg=panel)
-        pp_p = self._round_img(W, H, R, self._shade(signal, -0.16), bg=panel)
-        pri = f"pri{gen}.button"
-        style.element_create(pri, "image", pn, ("pressed", pp_p), ("active", pp_h),
-                             border=R, sticky="nsew", padding=(12, 5))
-        style.layout("Primary.TButton", leaf(pri))
-        style.configure("Primary.TButton", foreground=pri_fg,
-                        font=("Segoe UI Semibold", 10), anchor="center")
-        style.map("Primary.TButton", foreground=[("active", pri_fg), ("pressed", pri_fg)])
-        # иконочные кнопки: тот же скруглённый фон, но чёткий векторный icon-шрифт
-        if getattr(self, "_icon_font", ""):
-            ic_el = f"ic{gen}.button"
-            style.element_create(ic_el, "image", n, ("pressed", pr), ("active", hv),
-                                 border=R, sticky="nsew", padding=(6, 4))
-            style.layout("Icon.TButton", leaf(ic_el))
-            style.configure("Icon.TButton", foreground=ink, font=(self._icon_font, 11), anchor="center")
-            style.map("Icon.TButton", foreground=[("disabled", c["mute"]), ("active", ink)])
-            style.layout("IconPrimary.TButton", leaf(pri))
-            style.configure("IconPrimary.TButton", foreground=pri_fg,
-                            font=(self._icon_font, 13), anchor="center")
-            style.map("IconPrimary.TButton", foreground=[("active", pri_fg), ("pressed", pri_fg)])
-        # транспортная play/pause — акцентная мятная кнопка (главный фокус нижнего бара)
-        tn = self._round_img(W, H, R, signal, bg=panel)
-        th = self._round_img(W, H, R, self._shade(signal, -0.08), bg=panel)
-        tp = self._round_img(W, H, R, self._shade(signal, -0.16), bg=panel)
-        trans = f"trans{gen}.button"
-        style.element_create(trans, "image", tn, ("pressed", tp), ("active", th),
-                             border=R, sticky="nsew", padding=(12, 5))
-        style.layout("Transport.TButton", leaf(trans))
-        _tfont = (self._icon_font, 14) if getattr(self, "_icon_font", "") else ("Segoe UI Semibold", 11)
-        style.configure("Transport.TButton", foreground=pri_fg, font=_tfont, anchor="center")
-        style.map("Transport.TButton", foreground=[("active", pri_fg), ("pressed", pri_fg)])
+        try:
+            self._btn_imgs = []
+            gen = self._btn_gen = getattr(self, "_btn_gen", 0) + 1
+            ink, signal, panel, hairline = c["ink"], c["signal"], c["panel"], c["hairline"]
+            pri_fg = self._on_signal_fg(signal)
+            dark = str(self.var_theme.get()).lower().startswith("т") if hasattr(self, "var_theme") else True
+            W, H, R = 24, 28, 7
+            # вторичная заливка (обычные кнопки) — мягкая, с тонкой окантовкой
+            if dark:
+                sec_n, sec_h, sec_p = "#1c211f", "#262e2b", "#151918"
+            else:
+                sec_n, sec_h, sec_p = "#e9eeec", "#dce4e0", "#cfd9d4"
+            n  = self._round_img(W, H, R, sec_n, outline=hairline, ow=1, bg=panel)
+            hv = self._round_img(W, H, R, sec_h, outline=hairline, ow=1, bg=panel)
+            pr = self._round_img(W, H, R, sec_p, outline=hairline, ow=1, bg=panel)
+            sec = f"sec{gen}.button"
+            style.element_create(sec, "image", n, ("pressed", pr), ("active", hv),
+                                 border=R, sticky="nsew", padding=(9, 4))
+            leaf = lambda el: [(el, {"sticky": "nsew", "children": [("Button.label", {"sticky": "nsew"})]})]
+            style.layout("TButton", leaf(sec))
+            style.configure("TButton", foreground=ink, font=base_font, anchor="center")
+            style.map("TButton", foreground=[("disabled", c["mute"]), ("active", ink)])
+            style.layout("Toggle.TButton", leaf(sec))
+            style.configure("Toggle.TButton", foreground=ink, font=base_font, anchor="center")
+            style.map("Toggle.TButton", foreground=[("disabled", c["mute"]), ("active", ink)])
+            # активная таблетка (выбранный фильтр / выбранная скорость)
+            pa_n = self._round_img(W, H, R, c["sel"], outline=signal, ow=1, bg=panel)
+            pa_h = self._round_img(W, H, R, self._shade(c["sel"], 0.08), outline=signal, ow=1, bg=panel)
+            pa_el = f"pilla{gen}.button"
+            style.element_create(pa_el, "image", pa_n, ("pressed", pa_h), ("active", pa_h),
+                                 border=R, sticky="nsew", padding=(9, 4))
+            style.layout("PillActive.TButton", leaf(pa_el))
+            style.configure("PillActive.TButton", foreground=signal if dark else ink,
+                            font=self._f_semi(9), anchor="center")
+            style.map("PillActive.TButton", foreground=[("active", signal if dark else ink)])
+            # первичная (акцент) — мятная заливка, контрастный текст
+            pn = self._round_img(W, H, R, signal, bg=panel)
+            pp_h = self._round_img(W, H, R, self._shade(signal, -0.08), bg=panel)
+            pp_p = self._round_img(W, H, R, self._shade(signal, -0.16), bg=panel)
+            pri = f"pri{gen}.button"
+            style.element_create(pri, "image", pn, ("pressed", pp_p), ("active", pp_h),
+                                 border=R, sticky="nsew", padding=(12, 5))
+            style.layout("Primary.TButton", leaf(pri))
+            style.configure("Primary.TButton", foreground=pri_fg,
+                            font=self._f_semi(10), anchor="center")
+            style.map("Primary.TButton", foreground=[("active", pri_fg), ("pressed", pri_fg)])
+            # иконочные кнопки: тот же скруглённый фон, но чёткий векторный icon-шрифт
+            if getattr(self, "_icon_font", ""):
+                ic_el = f"ic{gen}.button"
+                style.element_create(ic_el, "image", n, ("pressed", pr), ("active", hv),
+                                     border=R, sticky="nsew", padding=(6, 4))
+                style.layout("Icon.TButton", leaf(ic_el))
+                style.configure("Icon.TButton", foreground=ink, font=(self._icon_font, 11), anchor="center")
+                style.map("Icon.TButton", foreground=[("disabled", c["mute"]), ("active", ink)])
+                style.layout("IconPrimary.TButton", leaf(pri))
+                style.configure("IconPrimary.TButton", foreground=pri_fg,
+                                font=(self._icon_font, 13), anchor="center")
+                style.map("IconPrimary.TButton", foreground=[("active", pri_fg), ("pressed", pri_fg)])
+            # транспортная play/pause — акцентная мятная кнопка (главный фокус нижнего бара)
+            tn = self._round_img(W, H, R, signal, bg=panel)
+            th = self._round_img(W, H, R, self._shade(signal, -0.08), bg=panel)
+            tp = self._round_img(W, H, R, self._shade(signal, -0.16), bg=panel)
+            trans = f"trans{gen}.button"
+            style.element_create(trans, "image", tn, ("pressed", tp), ("active", th),
+                                 border=R, sticky="nsew", padding=(12, 5))
+            style.layout("Transport.TButton", leaf(trans))
+            _tfont = (self._icon_font, 14) if getattr(self, "_icon_font", "") else self._f_semi(11)
+            style.configure("Transport.TButton", foreground=pri_fg, font=_tfont, anchor="center")
+            style.map("Transport.TButton", foreground=[("active", pri_fg), ("pressed", pri_fg)])
+        except Exception as e:
+            log_line(f"round_buttons fallback: {e}")
 
     def _ic(self, name: str, primary: bool = False):
         """Вернуть (text, style) для иконочной кнопки: чёткий глиф icon-шрифта, если он есть,
@@ -3210,7 +3227,11 @@ class VoicePlayerApp:
             c["err"], c["hairline"], c["sel"], c["active"])
         pri_fg = self._on_signal_fg(signal)
         self.root.configure(bg=bg)
-        base_font = ("Segoe UI", 10)
+        base_font = self._f(10)
+        semi_9 = self._f_semi(9)
+        semi_10 = self._f_semi(10)
+        semi_12 = self._f_semi(12)
+        semi_13 = self._f_semi(13)
         style.configure(".", background=panel, foreground=ink, fieldbackground=panel, font=base_font)
         style.configure("TFrame", background=panel)
         style.configure("Bg.TFrame", background=bg)
@@ -3219,20 +3240,20 @@ class VoicePlayerApp:
         style.configure("Sash", sashthickness=3, gripcount=0, background=hairline)
         style.configure("TLabel", background=panel, foreground=ink, font=base_font)
         style.configure("Card.TLabel", background=panel2, foreground=ink, font=base_font)
-        style.configure("Prompt.TLabel", background=panel2, foreground=signal, font=("Segoe UI Semibold", 9))
-        style.configure("Dim.TLabel", background=panel, foreground=mute, font=("Segoe UI", 9))
-        style.configure("Badge.TLabel", background=sel, foreground=signal, font=("Segoe UI Semibold", 9))
-        style.configure("Title.TLabel", background=panel, foreground=ink, font=("Segoe UI Semibold", 12))
-        style.configure("Hero.TLabel", background=panel, foreground=ink, font=("Segoe UI Semibold", 13))
-        style.configure("Now.TLabel", background=panel, foreground=ink, font=("Segoe UI", 11))
+        style.configure("Prompt.TLabel", background=panel2, foreground=signal, font=semi_9)
+        style.configure("Dim.TLabel", background=panel, foreground=mute, font=self._f(9))
+        style.configure("Badge.TLabel", background=sel, foreground=signal, font=semi_9)
+        style.configure("Title.TLabel", background=panel, foreground=ink, font=semi_12)
+        style.configure("Hero.TLabel", background=panel, foreground=ink, font=semi_13)
+        style.configure("Now.TLabel", background=panel, foreground=ink, font=self._f(11))
         # плоский фолбэк (если PIL нет — останется он)
         style.configure("TButton", background=panel2, foreground=ink, borderwidth=0, focusthickness=0, padding=(10, 5), anchor="center", font=base_font)
         style.map("TButton", background=[("active", active), ("pressed", hairline)], foreground=[("active", ink)])
-        style.configure("PillActive.TButton", background=sel, foreground=signal, borderwidth=0, padding=(10, 5), anchor="center", font=("Segoe UI Semibold", 9))
+        style.configure("PillActive.TButton", background=sel, foreground=signal, borderwidth=0, padding=(10, 5), anchor="center", font=semi_9)
         style.map("PillActive.TButton", background=[("active", sel)], foreground=[("active", signal)])
-        style.configure("Primary.TButton", background=signal, foreground=pri_fg, borderwidth=0, padding=(14, 6), anchor="center", font=("Segoe UI Semibold", 10))
+        style.configure("Primary.TButton", background=signal, foreground=pri_fg, borderwidth=0, padding=(14, 6), anchor="center", font=semi_10)
         style.map("Primary.TButton", background=[("active", self._shade(signal, -0.08)), ("pressed", self._shade(signal, -0.16))], foreground=[("active", pri_fg)])
-        style.configure("Transport.TButton", background=signal, foreground=pri_fg, borderwidth=0, padding=(14, 6), anchor="center", font=("Segoe UI Semibold", 12))
+        style.configure("Transport.TButton", background=signal, foreground=pri_fg, borderwidth=0, padding=(14, 6), anchor="center", font=semi_12)
         style.map("Transport.TButton", background=[("active", self._shade(signal, -0.08)), ("pressed", self._shade(signal, -0.16))], foreground=[("active", pri_fg)])
         style.configure("Toggle.TButton", background=panel2, foreground=ink, borderwidth=0, padding=(9, 4), anchor="center")
         style.map("Toggle.TButton", background=[("active", active)], foreground=[("active", ink)])
@@ -3247,7 +3268,7 @@ class VoicePlayerApp:
                         rowheight=38, borderwidth=1, relief="flat", font=base_font)
         style.configure("Treeview.Heading", background=panel2, foreground=mute,
                         bordercolor=hairline, lightcolor=panel2, darkcolor=panel2,
-                        relief="flat", borderwidth=0, padding=(4, 4), font=("Segoe UI Semibold", 9))
+                        relief="flat", borderwidth=0, padding=(4, 4), font=semi_9)
         style.map("Treeview.Heading", background=[("active", active)])
         style.map("Treeview", background=[("selected", sel)], foreground=[("selected", ink)])
         style.configure("Vertical.TScrollbar", background=panel2, troughcolor=panel,
@@ -3896,6 +3917,10 @@ class VoicePlayerApp:
         if not self.var_show_queue.get():
             self._hide_queue_panel()
         self._retranslate_ui()
+        try:
+            self.root.update_idletasks()
+        except Exception:
+            pass
 
     def _space_or_passthrough(self, e):
         if isinstance(e.widget, (ttk.Entry, tk.Text)):

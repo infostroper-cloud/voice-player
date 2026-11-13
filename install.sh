@@ -202,6 +202,57 @@ fi
 
 # Desktop integration for macOS
 if [ "$PLATFORM" = "macOS" ]; then
+    MAC_APP="/Applications/VoicePlayer.app"
+    if [ ! -w "/Applications" ]; then
+        MAC_APP="$HOME/Applications/VoicePlayer.app"
+        mkdir -p "$HOME/Applications"
+    fi
+    rm -rf "$MAC_APP"
+    mkdir -p "$MAC_APP/Contents/MacOS"
+    mkdir -p "$MAC_APP/Contents/Resources"
+
+    cat << EOF > "$MAC_APP/Contents/MacOS/VoicePlayer"
+#!/usr/bin/env bash
+export TK_SILENCE_DEPRECATION=1
+cd "$TARGET_DIR"
+exec "$PY_BIN" "$TARGET_DIR/app.py" "\$@"
+EOF
+    chmod +x "$MAC_APP/Contents/MacOS/VoicePlayer"
+
+    cat << 'EOF' > "$MAC_APP/Contents/Info.plist"
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleName</key>
+    <string>VoicePlayer</string>
+    <key>CFBundleDisplayName</key>
+    <string>VoicePlayer</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.voiceplayer.app</string>
+    <key>CFBundleVersion</key>
+    <string>1.2.0</string>
+    <key>CFBundleShortVersionString</key>
+    <string>1.2.0</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleExecutable</key>
+    <string>VoicePlayer</string>
+    <key>CFBundleIconFile</key>
+    <string>icon</string>
+    <key>NSHighResolutionCapable</key>
+    <true/>
+    <key>LSMinimumSystemVersion</key>
+    <string>10.15</string>
+</dict>
+</plist>
+EOF
+
+    if [ -f "$TARGET_DIR/icon.png" ]; then
+        cp "$TARGET_DIR/icon.png" "$MAC_APP/Contents/Resources/icon.png" 2>/dev/null || true
+    fi
+
+    # Также сохраняем быстрый командный файл в $HOME/Applications
     MAC_APP_DIR="$HOME/Applications"
     mkdir -p "$MAC_APP_DIR"
     MAC_LAUNCHER="$MAC_APP_DIR/VoicePlayer.command"
@@ -212,12 +263,22 @@ cd "$TARGET_DIR"
 exec "$PY_BIN" "$TARGET_DIR/app.py" "\$@"
 EOF
     chmod +x "$MAC_LAUNCHER"
-    echo "✓ macOS launcher created in $MAC_LAUNCHER"
+
+    # Снимаем атрибуты карантина Gatekeeper и подписываем приложение ad-hoc:
+    # больше никаких системных предупреждений ни при первом, ни при повторных запусках!
+    xattr -cr "$MAC_APP" 2>/dev/null || true
+    xattr -cr "$MAC_APP_DIR" 2>/dev/null || true
+    xattr -cr "$INSTALL_DIR" 2>/dev/null || true
+    codesign --force --deep --sign - "$MAC_APP" 2>/dev/null || true
+
+    echo "✓ macOS native app created in $MAC_APP"
+    echo "✓ macOS Gatekeeper quarantine removed & ad-hoc signature applied"
 fi
 
 echo "=========================================================="
 echo "🎉 VoicePlayer v1.2.0 installed successfully!"
-echo "Run from terminal: ~/.local/bin/voiceplayer"
+echo "Run from Applications: VoicePlayer"
+echo "Or from terminal: ~/.local/bin/voiceplayer"
 echo "Or start now..."
 echo "=========================================================="
 
@@ -229,9 +290,13 @@ pkill -f "voice-player/versions" 2>/dev/null || true
 if [ "$PLATFORM" = "macOS" ]; then
     echo "Launching VoicePlayer window on macOS..."
     export TK_SILENCE_DEPRECATION=1
-    nohup "$PY_BIN" "$TARGET_DIR/app.py" >> "$INSTALL_DIR/crash.log" 2>&1 &
-    sleep 1
-    osascript -e 'tell application "System Events" to set frontmost of first process whose name contains "python" to true' 2>/dev/null || true
+    if [ -d "$MAC_APP" ]; then
+        open "$MAC_APP"
+    else
+        nohup "$PY_BIN" "$TARGET_DIR/app.py" >> "$INSTALL_DIR/crash.log" 2>&1 &
+        sleep 1
+        osascript -e 'tell application "System Events" to set frontmost of first process whose name contains "python" to true' 2>/dev/null || true
+    fi
 elif [ -n "$DISPLAY" ]; then
     echo "Launching VoicePlayer in background..."
     nohup "$LOCAL_LAUNCHER" >> "$INSTALL_DIR/crash.log" 2>&1 &
