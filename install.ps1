@@ -1,4 +1,4 @@
-# VoicePlayer Windows Installer - Zero-SmartScreen
+﻿# VoicePlayer Windows Installer - Zero-SmartScreen
 # https://github.com/infostroper-cloud/voice-player
 
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12

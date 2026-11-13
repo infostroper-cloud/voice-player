@@ -442,13 +442,13 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "%~d
 exit /b 0
 """
 
-UNINSTALL_PS1 = """param([switch]$Quiet)
+UNINSTALL_PS1 = r"""param([switch]$Quiet)
 
 # Гарантируем правильную кодировку вывода в консоль и диалогах
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 
 # 1. Немедленно удаляем запись из «Установленных приложений» Windows (HKCU Uninstall)
-Remove-Item -Path "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\VoicePlayer" -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\VoicePlayer" -Recurse -Force -ErrorAction SilentlyContinue
 
 # 2. Завершаем все запущенные процессы VoicePlayer
 Get-Process | Where-Object { $_.MainWindowTitle -like "*VoicePlayer*" } | Stop-Process -Force -ErrorAction SilentlyContinue
@@ -462,7 +462,7 @@ $dirsToClean = @(
     [Environment]::GetFolderPath('CommonDesktopDirectory'),
     (Join-Path $env:USERPROFILE "Desktop"),
     (Join-Path $env:USERPROFILE "OneDrive\Desktop"),
-    "C:\Users\Public\Desktop",
+    (Join-Path $env:PUBLIC "Desktop"),
     [Environment]::GetFolderPath('Programs'),
     [Environment]::GetFolderPath('CommonPrograms'),
     (Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs"),

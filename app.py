@@ -2275,8 +2275,6 @@ class VoicePlayerApp:
         if vp_piper.is_local(self._voice):  # голос в памяти заранее — первая реплика не ждёт загрузки
             threading.Thread(target=self._preload_voice, args=(self._voice,), daemon=True, name="voice-preload").start()
 
-        self._build_ui()
-
         # Плеер: StreamPlayer (мгновенная скорость, тон сохраняется) если есть библиотеки,
         # иначе откат на MciPlayer (скорость только при пересоздании файла).
         if _STREAM_OK:
@@ -2296,6 +2294,8 @@ class VoicePlayerApp:
             self._stream_backend = False
             log_line("backend=AfPlayer (нативный системный плеер macOS/Linux)")
         self.player.set_volume(self.var_volume.get())
+
+        self._build_ui()
 
         threading.Thread(target=board_poll_loop, args=(self,), daemon=True, name="board-poll").start()
         try:
@@ -4497,23 +4497,24 @@ class VoicePlayerApp:
     # ------------------ диктовка ответа голосом ------------------
     def _toggle_dictate(self):
         if not (_STREAM_OK and _WHISPER_OK):
-            messagebox.showerror(APP_NAME, "Нужны аудио-движок и распознавание."); return
+            messagebox.showerror(APP_NAME, "Нужны аудио-движок и распознавание (whisper)."); return
         if not self._recording and not self._recording_to_field:
             try:
                 self._recorder.start()
                 self._recording_to_field = True
                 self.btn_dictate.configure(text="⏺ Стоп")
                 self._set_status("диктуй ответ… ещё раз — стоп", ok=True)
+                self._notify("Голосовая диктовка", "Говорите в микрофон... Нажмите Ctrl+Alt+D или кнопку ещё раз для завершения")
             except Exception as e:
-                messagebox.showerror(APP_NAME, f"Не удалось:\n{e}")
+                messagebox.showerror(APP_NAME, f"Не удалось включить запись:\n{e}")
         elif self._recording_to_field:
             self._recording_to_field = False
-            self.btn_dictate.configure(text="🎤→✍ Диктовать")
+            self.btn_dictate.configure(text="🎤 " + vp_i18n.t("dictate"))
             path = AUDIO_DIR / f"dict_{uuid4().hex[:8]}.wav"
             try:
                 ok = self._recorder.stop(path)
             except Exception as e:
-                messagebox.showerror(APP_NAME, f"Ошибка:\n{e}"); return
+                messagebox.showerror(APP_NAME, f"Ошибка записи:\n{e}"); return
             if not ok:
                 self._set_status("пусто", ok=False); return
             self._set_status("распознаю продиктованное…", ok=True)
@@ -4532,7 +4533,13 @@ class VoicePlayerApp:
             cur = self.tts_input.get("1.0", "end").strip()
             self.tts_input.delete("1.0", "end")
             self.tts_input.insert("1.0", (cur + " " + text).strip() if cur else text)
-            self._set_status("продиктовано — правь и отправляй", ok=True)
+            try:
+                self.root.clipboard_clear()
+                self.root.clipboard_append(text)
+            except Exception:
+                pass
+            self._set_status("продиктовано — скопировано в буфер (Ctrl+V)", ok=True)
+            self._notify("Голосовой ввод завершён", f"Текст скопирован в буфер: {text[:80]}")
         else:
             self._set_status("не распознал — повтори", ok=False)
 
@@ -8413,43 +8420,68 @@ class VoicePlayerApp:
             import ctypes
             from ctypes import wintypes
             user32 = ctypes.windll.user32
-            MOD_ALT, MOD_CONTROL, MOD_NOREPEAT = 0x0001, 0x0002, 0x4000
-            VK_S = 0x53
-            HOTKEY_ID = 1
-            ok = False
-            for attempt in range(5):
-                if user32.RegisterHotKey(None, HOTKEY_ID,
-                                         MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, VK_S):
-                    ok = True; break
-                time.sleep(0.6)   # вдруг прошлый экземпляр ещё не освободил
-            if not ok:
-                log_line("global hotkey Ctrl+Alt+S register FAILED (занята другой программой?)")
+            MOD_ALT, MOD_CONTROL, MOD_SHIFT, MOD_WIN, MOD_NOREPEAT = 0x0001, 0x0002, 0x0004, 0x0008, 0x4000
+            VK_S, VK_P, VK_D = 0x53, 0x50, 0x44
+
+            # Регистрируем глобальные комбинации (основные + альтернативные):
+            # 1. Ctrl+Alt+S (основная — озвучить выделение)
+            # 2. Ctrl+Alt+P (показать / скрыть окно VoicePlayer)
+            # 3. Win+Alt+S  (быстрая и бесконфликтная на Windows 10/11)
+            # 4. Ctrl+Shift+S (удобная альтернатива без Alt)
+            # 5. Win+Alt+P  (показать / скрыть окно)
+            # 6. Ctrl+Alt+D (глобальная диктовка голосом из любого окна)
+            # 7. Win+Alt+D  (глобальная диктовка альтернативная)
+            hotkeys = [
+                (1, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, VK_S, "Ctrl+Alt+S (озвучить выделение)"),
+                (2, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, VK_P, "Ctrl+Alt+P (показать/скрыть)"),
+                (3, MOD_WIN | MOD_ALT | MOD_NOREPEAT, VK_S, "Win+Alt+S (озвучить выделение)"),
+                (4, MOD_CONTROL | MOD_SHIFT | MOD_NOREPEAT, VK_S, "Ctrl+Shift+S (озвучить выделение)"),
+                (5, MOD_WIN | MOD_ALT | MOD_NOREPEAT, VK_P, "Win+Alt+P (показать/скрыть)"),
+                (6, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, VK_D, "Ctrl+Alt+D (голосовая диктовка)"),
+                (7, MOD_WIN | MOD_ALT | MOD_NOREPEAT, VK_D, "Win+Alt+D (голосовая диктовка)"),
+            ]
+            registered_any_speak = False
+            for hid, mod, vk, desc in hotkeys:
+                ok = False
+                for _ in range(3):
+                    if user32.RegisterHotKey(None, hid, mod, vk):
+                        ok = True
+                        break
+                    time.sleep(0.12)
+                if ok:
+                    log_line(f"global hotkey {desc} registered")
+                    if hid in (1, 3, 4):
+                        registered_any_speak = True
+                else:
+                    err = ctypes.GetLastError()
+                    log_line(f"global hotkey {desc} register FAILED (err={err})")
+
+            if not registered_any_speak:
+                log_line("All speak hotkeys failed to register! Fallback to double Ctrl+C and clipboard.")
                 self.root.after(0, lambda: self._set_status(
-                    "Ctrl+Alt+S занята другим софтом — поле «Озвучить» работает", ok=False))
-            else:
-                log_line("global hotkey Ctrl+Alt+S registered")
-            # аппаратные медиа-клавиши клавиатуры (▶⏸ ⏭ ⏮ ⏹) ловим НИЗКОУРОВНЕВЫМ
-            # хуком, а не RegisterHotKey: хук видит нажатие ВСЕГДА, даже если эти кнопки
-            # уже «забрал» другой плеер — так наш плеер сам распознаёт их, как Spotify и пр.
-            if user32.RegisterHotKey(None, 2, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, 0x50):   # P
-                log_line("global hotkey Ctrl+Alt+P registered")
+                    "Горячие клавиши заняты — работает двойное Ctrl+C или поле ввода", ok=False))
+
             self._install_media_hook(user32)
             msg = wintypes.MSG()
             while not self.stop_event.is_set():
                 r = user32.GetMessageW(ctypes.byref(msg), None, 0, 0)
                 if r in (0, -1):
                     break
-                if msg.message == 0x0312 and int(msg.wParam) == 1:   # WM_HOTKEY Ctrl+Alt+S
-                    self.root.after(0, self._speak_selection)
-                elif msg.message == 0x0312 and int(msg.wParam) == 2:  # WM_HOTKEY Ctrl+Alt+P
-                    self.root.after(0, self._toggle_window)
+                if msg.message == 0x0312:   # WM_HOTKEY
+                    hid = int(msg.wParam)
+                    if hid in (1, 3, 4):    # Озвучить выделенный текст
+                        threading.Thread(target=self._speak_selection_worker, daemon=True, name="speak-sel").start()
+                    elif hid in (2, 5):     # Показать / скрыть плеер
+                        self.root.after(0, self._toggle_window)
+                    elif hid in (6, 7):     # Глобальная диктовка
+                        self.root.after(0, self._toggle_dictate)
         except Exception as e:
             log_line(f"hotkey loop error: {e}")
 
     def _install_media_hook(self, user32):
-        """Низкоуровневый хук клавиатуры (WH_KEYBOARD_LL): ловит аппаратные медиа-кнопки
-        play/pause, next, prev, stop и переключает наш плеер. Не «съедает» нажатие
-        (CallNextHookEx), поэтому не ломает другие приложения и системные кнопки громкости."""
+        """Низкоуровневый хук клавиатуры (WH_KEYBOARD_LL):
+        1) Ловит аппаратные медиа-кнопки play/pause, next, prev, stop.
+        2) Поддерживает двойное нажатие Ctrl+C (как в DeepL): выделил текст -> дважды Ctrl+C -> плеер мгновенно озвучивает."""
         import ctypes
         from ctypes import wintypes
         try:
@@ -8466,7 +8498,6 @@ class VoicePlayerApp:
                             ("flags", wintypes.DWORD), ("time", wintypes.DWORD),
                             ("dwExtraInfo", ULONG_PTR)]
 
-            # колбэк хука обязан быть stdcall (WINFUNCTYPE), иначе падение при вызове
             HOOKPROC = ctypes.WINFUNCTYPE(LRESULT, ctypes.c_int, wintypes.WPARAM, wintypes.LPARAM)
             user32.CallNextHookEx.restype = LRESULT
             user32.CallNextHookEx.argtypes = [wintypes.HHOOK, ctypes.c_int,
@@ -8474,10 +8505,11 @@ class VoicePlayerApp:
             user32.SetWindowsHookExW.restype = wintypes.HHOOK
             user32.SetWindowsHookExW.argtypes = [ctypes.c_int, HOOKPROC,
                                                  wintypes.HINSTANCE, wintypes.DWORD]
-            # ВАЖНО: без restype хэндл модуля обрежется до 32 бит → SetWindowsHookEx упадёт
             k32 = ctypes.windll.kernel32
             k32.GetModuleHandleW.restype = wintypes.HMODULE
             k32.GetModuleHandleW.argtypes = [wintypes.LPCWSTR]
+
+            self._last_ctrl_c_ts = 0.0
 
             def _proc(nCode, wParam, lParam):
                 try:
@@ -8486,15 +8518,26 @@ class VoicePlayerApp:
                         act = VK.get(vk)
                         if act:
                             self.root.after(0, act)
+                        elif vk == 0x43:   # Клавиша 'C'
+                            ctrl_down = (user32.GetAsyncKeyState(0x11) & 0x8000) != 0
+                            alt_down  = (user32.GetAsyncKeyState(0x12) & 0x8000) != 0
+                            if ctrl_down and not alt_down:
+                                now = time.time()
+                                if now - getattr(self, "_last_ctrl_c_ts", 0.0) < 0.45:
+                                    self._last_ctrl_c_ts = 0.0
+                                    # Двойное Ctrl+C — скопировано и сразу озвучиваем!
+                                    self.root.after(80, lambda: self._speak_clipboard(copied_hint=True))
+                                else:
+                                    self._last_ctrl_c_ts = now
                 except Exception:
                     pass
                 return user32.CallNextHookEx(None, nCode, wParam, lParam)
 
-            self._media_hook_proc = HOOKPROC(_proc)   # держим ссылку, иначе соберёт GC
+            self._media_hook_proc = HOOKPROC(_proc)
             hmod = k32.GetModuleHandleW(None)
             self._media_hook = user32.SetWindowsHookExW(13, self._media_hook_proc, hmod, 0)
             if self._media_hook:
-                log_line("media keys hook installed (play/pause/next/prev)")
+                log_line("media keys + double Ctrl+C hook installed")
             else:
                 err = ctypes.get_last_error() if hasattr(ctypes, "get_last_error") else 0
                 log_line(f"media keys hook FAILED err={err}")
@@ -8534,37 +8577,71 @@ class VoicePlayerApp:
                 pass
 
     def _speak_selection(self):
-        # копируем текущее выделение из активного окна (Ctrl+C) и озвучиваем
-        self._send_ctrl_c()
-        self.root.after(240, self._speak_clipboard)
+        """Запуск фонового копирования и озвучки выделенного текста."""
+        threading.Thread(target=self._speak_selection_worker, daemon=True, name="speak-sel").start()
 
-    def _send_ctrl_c(self):
+    def _speak_selection_worker(self):
+        """Интеллектуальный захват выделения:
+        1) Ждёт отпускания Alt/Win/S, чтобы активное приложение не получало Ctrl+Alt+C.
+        2) Посылает чистое Ctrl+C со сканкодами 0x1D и 0x2E (совместимо с Electron/DeepSeek/Comet/Chrome/Notepad).
+        3) Отслеживает реальное обновление буфера через GetClipboardSequenceNumber.
+        4) Озвучивает текст без задержек."""
+        copied = False
         try:
             import ctypes
             user32 = ctypes.windll.user32
-            VK_MENU, VK_CONTROL, VK_C, VK_S = 0x12, 0x11, 0x43, 0x53
-            KEYEVENTF_KEYUP = 0x0002
-            # Программно отпускаем Alt и S, чтобы приложение не получило Ctrl+Alt+C
-            user32.keybd_event(VK_MENU, 0, KEYEVENTF_KEYUP, 0)
-            user32.keybd_event(VK_S, 0, KEYEVENTF_KEYUP, 0)
-            time.sleep(0.04)
-            # Отправляем стандартное копирование Ctrl+C
-            user32.keybd_event(VK_CONTROL, 0, 0, 0)
-            user32.keybd_event(VK_C, 0, 0, 0)
-            time.sleep(0.02)
-            user32.keybd_event(VK_C, 0, KEYEVENTF_KEYUP, 0)
-            user32.keybd_event(VK_CONTROL, 0, KEYEVENTF_KEYUP, 0)
-        except Exception as e:
-            log_line(f"send ctrl+c error: {e}")
 
-    def _speak_clipboard(self):
+            # 1. Ждём, пока пользователь отпустит физические клавиши Alt, Win, S (до 350мс)
+            t0 = time.time()
+            while time.time() - t0 < 0.35:
+                alt_down = (user32.GetAsyncKeyState(0x12) & 0x8000) != 0
+                win_down = ((user32.GetAsyncKeyState(0x5B) & 0x8000) != 0 or
+                            (user32.GetAsyncKeyState(0x5C) & 0x8000) != 0)
+                s_down   = (user32.GetAsyncKeyState(0x53) & 0x8000) != 0
+                if not alt_down and not win_down and not s_down:
+                    break
+                time.sleep(0.02)
+
+            seq_before = user32.GetClipboardSequenceNumber() if hasattr(user32, "GetClipboardSequenceNumber") else 0
+
+            # 2. Гарантированно отпускаем Alt и Win
+            KEYEVENTF_KEYUP = 0x0002
+            user32.keybd_event(0x12, 0x38, KEYEVENTF_KEYUP, 0) # Alt
+            user32.keybd_event(0xA4, 0x38, KEYEVENTF_KEYUP, 0) # LAlt
+            user32.keybd_event(0xA5, 0x38, KEYEVENTF_KEYUP, 0) # RAlt
+            user32.keybd_event(0x53, 0x1F, KEYEVENTF_KEYUP, 0) # S
+            user32.keybd_event(0x5B, 0, KEYEVENTF_KEYUP, 0)    # LWin
+            user32.keybd_event(0x5C, 0, KEYEVENTF_KEYUP, 0)    # RWin
+            time.sleep(0.03)
+
+            # 3. Отправляем Ctrl+C со сканкодами
+            user32.keybd_event(0x11, 0x1D, 0, 0)                # Ctrl down
+            user32.keybd_event(0x43, 0x2E, 0, 0)                # C down
+            time.sleep(0.03)
+            user32.keybd_event(0x43, 0x2E, KEYEVENTF_KEYUP, 0)  # C up
+            user32.keybd_event(0x11, 0x1D, KEYEVENTF_KEYUP, 0)  # Ctrl up
+
+            # 4. Ждём обновления буфера обмена (до 300мс)
+            t1 = time.time()
+            while time.time() - t1 < 0.30:
+                if hasattr(user32, "GetClipboardSequenceNumber"):
+                    if user32.GetClipboardSequenceNumber() != seq_before:
+                        copied = True
+                        break
+                time.sleep(0.02)
+        except Exception as e:
+            log_line(f"speak selection error: {e}")
+
+        self.root.after(0, lambda: self._speak_clipboard(copied_hint=copied))
+
+    def _speak_clipboard(self, copied_hint: bool = True):
         txt = (self._clipboard_rich() or "").strip()
         if not txt:
-            self._set_status("буфер пуст — выдели текст и снова нажми Ctrl+Alt+S", ok=False)
+            self._set_status("Ничего не выделено — выделите текст и нажмите Ctrl+Alt+S (или дважды Ctrl+C)", ok=False)
             return
         item = self.enqueue(source="manual", author="Выделенный текст",
                             time_str=time.strftime("%H:%M"), text=txt, dedup=False)
-        self._speak_now(item, "выделенный текст (Ctrl+Alt+S)")
+        self._speak_now(item, "выделенный текст")
 
     def _tick(self):
         try:
@@ -8659,11 +8736,16 @@ class VoicePlayerApp:
         ttk.Label(box, text="⌨ " + vp_i18n.t("shortcuts_title"), font=("Segoe UI Semibold", 13)).pack(anchor="w", pady=(0, 10))
 
         lang = vp_i18n.get_lang()
+        cat_global = "⚡ Глобальные" if lang == "ru" else "⚡ Global"
         cat_play = vp_i18n.t("tab_playback")
         cat_ctrl = vp_i18n.t("control")
         cat_q = vp_i18n.t("queue")
 
         DESCS = {
+            "global_speak": {"ru": "Озвучить выделенный текст в любом окне", "en": "Speak selected text in any window"},
+            "double_c_speak": {"ru": "Дважды Ctrl+C — быстрая озвучка (как в DeepL)", "en": "Double Ctrl+C — quick speak copied text"},
+            "global_dictate": {"ru": "Голосовая диктовка (микрофон → буфер и поле)", "en": "Global voice dictation (mic to clipboard)"},
+            "global_toggle": {"ru": "Показать / скрыть окно VoicePlayer", "en": "Show / hide VoicePlayer window"},
             "space": {"ru": "Пауза / Продолжить", "en": "Play / Pause toggle", "es": "Pausa / Reanudar", "zh": "播放 / 暂停切换", "ja": "再生 / 一時停止の切替", "de": "Wiedergabe / Pause", "fr": "Lecture / Pause", "hi": "रोकें / जारी रखें"},
             "ctrl_enter": {"ru": "Озвучить текст из поля ввода", "en": "Speak text from input box", "es": "Leer texto del campo", "zh": "朗读输入框中的文本", "ja": "入力欄のテキストを読み上げ", "de": "Text aus Eingabefeld vorlesen", "fr": "Lire le texte du champ", "hi": "इनपुट बॉक्स से टेक्स्ट बोलें"},
             "arrows_lr": {"ru": "Следующая / Предыдущая реплика", "en": "Next / Previous item", "es": "Siguiente / Anterior elemento", "zh": "下一条 / 上一条", "ja": "次 / 前のアイテム", "de": "Nächstes / Vorheriges Element", "fr": "Élément suivant / précédent", "hi": "अगला / पिछला आइटम"},
@@ -8695,6 +8777,11 @@ class VoicePlayerApp:
 
         # Список горячих клавиш: (Категория, Комбинация, Действие)
         shortcuts = [
+            (cat_global, "Ctrl + Alt + S  /  Win + Alt + S", d("global_speak")),
+            (cat_global, "Ctrl + Shift + S", d("global_speak")),
+            (cat_global, "Дважды Ctrl + C", d("double_c_speak")),
+            (cat_global, "Ctrl + Alt + D  /  Win + Alt + D", d("global_dictate")),
+            (cat_global, "Ctrl + Alt + P  /  Win + Alt + P", d("global_toggle")),
             (cat_play, "Space  /  K", d("space")),
             (cat_play, "Ctrl + Enter", d("ctrl_enter")),
             (cat_play, "→  /  ←", d("arrows_lr")),
