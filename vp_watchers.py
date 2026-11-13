@@ -501,6 +501,203 @@ class AntigravityWatcher:
         return out
 
 
+# ------------------------------------------------------------------ Cline
+
+class ClineWatcher:
+    source = "cline"
+
+    def __init__(self, home: Path, state: dict):
+        self.home = Path(home)
+        self.state = state
+
+    def available(self) -> bool:
+        return any(p.is_dir() for p in self._task_bases())
+
+    def _task_bases(self) -> list[Path]:
+        return [
+            self.home / "AppData/Roaming/Code/User/globalStorage/saoudrizwan.claude-dev/tasks",
+            self.home / ".config/Code/User/globalStorage/saoudrizwan.claude-dev/tasks",
+            self.home / "Library/Application Support/Code/User/globalStorage/saoudrizwan.claude-dev/tasks",
+        ]
+
+    def _task_dirs(self) -> list[Path]:
+        out = []
+        for base in self._task_bases():
+            if base.is_dir():
+                try:
+                    for d in base.iterdir():
+                        if d.is_dir():
+                            out.append(d)
+                except OSError:
+                    pass
+        return out
+
+    def poll(self, now: Optional[float] = None) -> list:
+        now = time.time() if now is None else now
+        dirs = self._task_dirs()
+        if not dirs:
+            return []
+        seen = set(self.state.get("seen") or [])
+        out = []
+        for tdir in sorted(dirs, key=lambda d: d.stat().st_mtime if d.exists() else 0, reverse=True)[:8]:
+            msg_file = tdir / "ui_messages.json"
+            if not msg_file.exists():
+                continue
+            try:
+                st = msg_file.stat()
+                if now - st.st_mtime > CATCHUP_S:
+                    continue
+                data = json.loads(msg_file.read_text(encoding="utf-8", errors="replace"))
+                if not isinstance(data, list):
+                    continue
+                last_user = ""
+                for m in data:
+                    if m.get("type") == "ask" and m.get("ask") == "user_feedback":
+                        last_user = str(m.get("text") or "")[:300]
+                    elif m.get("say") in ("text", "completion_result"):
+                        text = str(m.get("text") or "").strip()
+                        ts = m.get("ts") or int(st.st_mtime * 1000)
+                        sig = f"cline:{tdir.name}:{ts}"
+                        if sig in seen:
+                            continue
+                        seen.add(sig)
+                        if text:
+                            title = _short(last_user or tdir.name[:8])
+                            out.append({
+                                "source": self.source,
+                                "author": f"Cline · {title}" if title else "Cline",
+                                "session": tdir.name[:8],
+                                "title": title,
+                                "prompt": last_user,
+                                "time": time.strftime("%H:%M", time.localtime(ts / 1000.0)),
+                                "date": time.strftime("%d.%m.%Y", time.localtime(ts / 1000.0)),
+                                "text": text,
+                                "key": sig,
+                            })
+            except Exception:
+                continue
+        if seen:
+            self.state["seen"] = list(seen)[-100:]
+        return out
+
+
+# ------------------------------------------------------------------ Aider
+
+class AiderWatcher:
+    source = "aider"
+
+    def __init__(self, home: Path, state: dict):
+        self.home = Path(home)
+        self.state = state
+
+    def available(self) -> bool:
+        return (self.home / ".aider.chat.history.md").exists()
+
+    def poll(self, now: Optional[float] = None) -> list:
+        now = time.time() if now is None else now
+        hist_file = self.home / ".aider.chat.history.md"
+        if not hist_file.exists():
+            return []
+        try:
+            st = hist_file.stat()
+        except OSError:
+            return []
+        off = self.state.get("off", 0)
+        if not self.state.get("init"):
+            self.state["init"] = True
+            self.state["off"] = st.st_size
+            return []
+        if st.st_size < off:
+            off = 0
+        if st.st_size == off:
+            return []
+        try:
+            with open(hist_file, "rb") as f:
+                f.seek(off)
+                chunk = f.read()
+        except OSError:
+            return []
+        self.state["off"] = off + len(chunk)
+        raw_text = chunk.decode("utf-8", "replace").strip()
+        if not raw_text:
+            return []
+        lines = []
+        user_prompt = ""
+        for line in raw_text.splitlines():
+            if line.startswith("#### ") or line.startswith("# "):
+                user_prompt = line.lstrip("#").strip()
+            else:
+                lines.append(line)
+        text = "\n".join(lines).strip()
+        if not text:
+            return []
+        title = _short(user_prompt or "Aider Chat")
+        return [{
+            "source": self.source,
+            "author": f"Aider · {title}" if title else "Aider",
+            "session": "aider",
+            "title": title,
+            "prompt": user_prompt,
+            "time": time.strftime("%H:%M", time.localtime(now)),
+            "date": time.strftime("%d.%m.%Y", time.localtime(now)),
+            "text": text,
+            "key": f"aider:{int(now*1000)}",
+        }]
+
+
+# ------------------------------------------------------------------ Terminal
+
+class TerminalWatcher:
+    source = "terminal"
+
+    def __init__(self, vp_home: Path, state: dict):
+        self.home = Path(vp_home)
+        self.state = state
+
+    def available(self) -> bool:
+        return (self.home / "terminal.log").exists()
+
+    def poll(self, now: Optional[float] = None) -> list:
+        now = time.time() if now is None else now
+        log_file = self.home / "terminal.log"
+        if not log_file.exists():
+            return []
+        try:
+            st = log_file.stat()
+        except OSError:
+            return []
+        off = self.state.get("off", 0)
+        if not self.state.get("init"):
+            self.state["init"] = True
+            self.state["off"] = st.st_size
+            return []
+        if st.st_size < off:
+            off = 0
+        if st.st_size == off:
+            return []
+        try:
+            with open(log_file, "rb") as f:
+                f.seek(off)
+                chunk = f.read()
+        except OSError:
+            return []
+        self.state["off"] = off + len(chunk)
+        text = chunk.decode("utf-8", "replace").strip()
+        if not text:
+            return []
+        return [{
+            "source": self.source,
+            "author": "Terminal · Вывод команды",
+            "session": "cli",
+            "title": "Терминал",
+            "prompt": "",
+            "time": time.strftime("%H:%M", time.localtime(now)),
+            "date": time.strftime("%d.%m.%Y", time.localtime(now)),
+            "text": text,
+            "key": f"term:{int(now*1000)}",
+        }]
+
+
 # ---------------------------------------------------------------- общий цикл
 
 class Watchers:
@@ -520,6 +717,9 @@ class Watchers:
         self.items = {
             "codex": CodexWatcher(home / ".codex", self.state.setdefault("codex", {})),
             "antigravity": AntigravityWatcher(home / ".gemini", self.state.setdefault("antigravity", {})),
+            "cline": ClineWatcher(home, self.state.setdefault("cline", {})),
+            "aider": AiderWatcher(home, self.state.setdefault("aider", {})),
+            "terminal": TerminalWatcher(home / ".voice-player", self.state.setdefault("terminal", {})),
         }
         self._errors: dict = {}
 

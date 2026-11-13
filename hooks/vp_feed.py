@@ -17,10 +17,31 @@ from uuid import uuid4
 
 LABELS = {
     "antigravity": "Antigravity",
-    "claude-code": "Claude",
+    "claude-code": "Claude Code",
+    "claude": "Claude Code",
     "codex": "Codex",
     "cursor": "Cursor",
     "gemini": "Gemini",
+    "openclaw": "OpenClaw",
+    "opencode": "OpenCode",
+    "hermes-agent": "Hermes Agent",
+    "hermes": "Hermes Agent",
+    "hermes-desktop": "Hermes Desktop",
+    "droid": "Droid",
+    "pi": "Pi",
+    "cline": "Cline",
+    "copilot-cli": "Copilot CLI",
+    "oh-my-pi": "Oh My Pi",
+    "deepseek": "DeepSeek Harness",
+    "qwen": "Qwen Code",
+    "qwen-code": "Qwen Code",
+    "ollama": "Ollama",
+    "perplexity": "Perplexity",
+    "comet": "Comet",
+    "vscode": "VS Code",
+    "aider": "Aider",
+    "windsurf": "Windsurf",
+    "terminal": "Terminal",
 }
 TEXT_FIELDS = ("last_assistant_message", "text", "prompt_response", "response")
 SESSION_FIELDS = ("session_id", "conversation_id", "conversationId", "thread_id")
@@ -176,10 +197,18 @@ def main(argv=None) -> int:
     tool = argv[1] if len(argv) > 1 else "ai"
     status = "no final text"
     try:
-        raw = sys.stdin.buffer.read().decode("utf-8-sig", "replace") or "{}"
-        data = json.loads(raw)
-        if isinstance(data, dict):
-            text, session, prompt = extract_full(data, tool)
+        raw = sys.stdin.buffer.read().decode("utf-8-sig", "replace").strip()
+        if raw:
+            text, session, prompt = "", "", ""
+            try:
+                data = json.loads(raw)
+                if isinstance(data, dict):
+                    text, session, prompt = extract_full(data, tool)
+                elif isinstance(data, str):
+                    text = data.strip()
+            except Exception:
+                # Обычный текст из пайпа консоли (например: echo 'Привет' | vp-say)
+                text = raw
             if text:
                 send(tool, text, session, prompt)
                 status = "queued"

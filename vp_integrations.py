@@ -44,19 +44,289 @@ def _antigravity_entry(command: str) -> dict:
     return {"type": "command", "command": command, "timeout": 10}
 
 
-# path — файл настроек от домашней папки; event — событие «ответ готов».
+def _generic_entry(command: str) -> dict:
+    return {"command": command, "type": "command", "timeout": 15}
+
+
+# Полный реестр поддерживаемых нейросетей, CLI-ассистентов и редакторов (23 инструмента)
 HOOK_TOOLS = {
-    "antigravity": {"label": "Antigravity", "home": ".gemini/antigravity",
-                    "path": ".gemini/config/hooks.json",
-                    "event": "Stop", "entry": _antigravity_entry, "named_root": "voice-player"},
-    "codex":       {"label": "Codex (App + CLI)", "home": ".codex", "path": ".codex/hooks.json",
-                    "event": "Stop", "entry": _claude_entry},
-    "claude-code": {"label": "Claude Code", "home": ".claude", "path": ".claude/settings.json",
-                    "event": "Stop", "entry": _claude_entry},
-    "cursor":      {"label": "Cursor", "home": ".cursor", "path": ".cursor/hooks.json",
-                    "event": "afterAgentResponse", "entry": _cursor_entry},
-    "gemini":      {"label": "Gemini CLI", "home": ".gemini", "path": ".gemini/settings.json",
-                    "event": "AfterAgent", "entry": _gemini_entry},
+    # 1. Antigravity
+    "antigravity": {
+        "label": "Google Antigravity",
+        "icon": "🌌",
+        "category": "agents",
+        "home": ".gemini/antigravity",
+        "path": ".gemini/config/hooks.json",
+        "event": "Stop",
+        "entry": _antigravity_entry,
+        "named_root": "voice-player",
+        "desc": "Google Antigravity IDE, App и CLI",
+        "setup_tip": "https://antigravity.google",
+    },
+    # 2. Codex
+    "codex": {
+        "label": "Codex CLI & App",
+        "icon": "⚡",
+        "category": "agents",
+        "home": ".codex",
+        "path": ".codex/hooks.json",
+        "event": "Stop",
+        "entry": _claude_entry,
+        "desc": "OpenAI Codex CLI и десктопное приложение",
+        "setup_tip": "npm i -g @openai/codex",
+    },
+    # 3. Claude Code
+    "claude-code": {
+        "label": "Claude Code",
+        "icon": "🤖",
+        "category": "agents",
+        "home": ".claude",
+        "path": ".claude/settings.json",
+        "event": "Stop",
+        "entry": _claude_entry,
+        "desc": "Anthropic Claude Code CLI агент",
+        "setup_tip": "npm i -g @anthropic-ai/claude-code",
+    },
+    # 4. Cursor
+    "cursor": {
+        "label": "Cursor",
+        "icon": "🎯",
+        "category": "ide",
+        "home": ".cursor",
+        "path": ".cursor/hooks.json",
+        "event": "afterAgentResponse",
+        "entry": _cursor_entry,
+        "desc": "Cursor AI IDE (Agent & Composer)",
+        "setup_tip": "https://cursor.com",
+    },
+    # 5. Gemini CLI
+    "gemini": {
+        "label": "Gemini CLI",
+        "icon": "💎",
+        "category": "cli",
+        "home": ".gemini",
+        "path": ".gemini/settings.json",
+        "event": "AfterAgent",
+        "entry": _gemini_entry,
+        "desc": "Google Gemini CLI инструмент",
+        "setup_tip": "pip install gemini-cli",
+    },
+    # 6. OpenClaw
+    "openclaw": {
+        "label": "OpenClaw",
+        "icon": "🦞",
+        "category": "agents",
+        "home": ".openclaw",
+        "path": ".openclaw/config.json",
+        "event": "onResponse",
+        "entry": _generic_entry,
+        "desc": "OpenClaw автономный агент разработки",
+        "setup_tip": "npm i -g openclaw",
+    },
+    # 7. OpenCode
+    "opencode": {
+        "label": "OpenCode",
+        "icon": "💻",
+        "category": "agents",
+        "home": ".opencode",
+        "path": ".opencode/config.json",
+        "event": "afterResponse",
+        "entry": _generic_entry,
+        "desc": "OpenCode AI coding assistant",
+        "setup_tip": "https://github.com/opencode-ai",
+    },
+    # 8. Hermes Agent
+    "hermes-agent": {
+        "label": "Hermes Agent",
+        "icon": "🕊️",
+        "category": "agents",
+        "home": ".hermes",
+        "path": ".hermes/config.json",
+        "event": "afterStep",
+        "entry": _generic_entry,
+        "desc": "Nous Hermes автономный агент",
+        "setup_tip": "pip install hermes-agent",
+    },
+    # 9. Hermes Desktop
+    "hermes-desktop": {
+        "label": "Hermes Desktop",
+        "icon": "🖥️",
+        "category": "agents",
+        "home": ".hermes-desktop",
+        "path": ".hermes-desktop/settings.json",
+        "event": "onMessage",
+        "entry": _generic_entry,
+        "desc": "Настольное приложение Hermes Desktop",
+        "setup_tip": "https://hermes.nousresearch.com",
+    },
+    # 10. Droid
+    "droid": {
+        "label": "Droid",
+        "icon": "🤖",
+        "category": "agents",
+        "home": ".droid",
+        "path": ".droid/config.json",
+        "event": "afterAgentResponse",
+        "entry": _generic_entry,
+        "desc": "Factory Droid AI агент",
+        "setup_tip": "https://droid.factory.ai",
+    },
+    # 11. Pi
+    "pi": {
+        "label": "Pi",
+        "icon": "🥧",
+        "category": "cli",
+        "home": ".pi",
+        "path": ".pi/config.json",
+        "event": "onResponse",
+        "entry": _generic_entry,
+        "desc": "Inflection Pi CLI ассистент",
+        "setup_tip": "pip install pi-cli",
+    },
+    # 12. Cline
+    "cline": {
+        "label": "Cline",
+        "icon": "🦾",
+        "category": "agents",
+        "home": ".cline",
+        "path": ".cline/config.json",
+        "event": "taskCompleted",
+        "entry": _generic_entry,
+        "desc": "Cline автономный агент в VS Code / CLI",
+        "setup_tip": "VS Code Extension: saoudrizwan.claude-dev",
+    },
+    # 13. Copilot CLI
+    "copilot-cli": {
+        "label": "Copilot CLI",
+        "icon": "🐙",
+        "category": "cli",
+        "home": ".copilot-cli",
+        "path": ".copilot-cli/config.json",
+        "event": "onCommand",
+        "entry": _generic_entry,
+        "desc": "GitHub Copilot CLI (gh copilot)",
+        "setup_tip": "gh extension install github/gh-copilot",
+    },
+    # 14. Oh My Pi
+    "oh-my-pi": {
+        "label": "Oh My Pi",
+        "icon": "🥧",
+        "category": "cli",
+        "home": ".oh-my-pi",
+        "path": ".oh-my-pi/config.json",
+        "event": "afterResponse",
+        "entry": _generic_entry,
+        "desc": "Oh My Pi расширенная среда",
+        "setup_tip": "https://github.com/oh-my-pi",
+    },
+    # 15. DeepSeek Harness
+    "deepseek": {
+        "label": "DeepSeek Harness",
+        "icon": "🐋",
+        "category": "agents",
+        "home": ".deepseek",
+        "path": ".deepseek/config.json",
+        "event": "afterResponse",
+        "entry": _generic_entry,
+        "desc": "DeepSeek агент и тестовый харнесс",
+        "setup_tip": "pip install deepseek-harness",
+    },
+    # 16. Qwen Code
+    "qwen-code": {
+        "label": "Qwen Code",
+        "icon": "💠",
+        "category": "agents",
+        "home": ".qwen",
+        "path": ".qwen/config.json",
+        "event": "afterResponse",
+        "entry": _generic_entry,
+        "desc": "Alibaba Qwen Code агент и CLI",
+        "setup_tip": "pip install qwen-code",
+    },
+    # 17. Ollama
+    "ollama": {
+        "label": "Ollama",
+        "icon": "🦙",
+        "category": "local_llm",
+        "home": ".ollama",
+        "path": ".ollama/voice-player.json",
+        "event": "onGeneration",
+        "entry": _generic_entry,
+        "desc": "Локальные модели LLaMA, Mistral, DeepSeek, Qwen",
+        "setup_tip": "https://ollama.com",
+    },
+    # 18. Perplexity
+    "perplexity": {
+        "label": "Perplexity",
+        "icon": "🔍",
+        "category": "chat",
+        "home": ".perplexity",
+        "path": ".perplexity/settings.json",
+        "event": "onResponse",
+        "entry": _generic_entry,
+        "desc": "Perplexity AI поиск и десктопное приложение",
+        "setup_tip": "https://perplexity.ai",
+    },
+    # 19. Comet
+    "comet": {
+        "label": "Comet",
+        "icon": "☄️",
+        "category": "chat",
+        "home": ".comet",
+        "path": ".comet/settings.json",
+        "event": "onResponse",
+        "entry": _generic_entry,
+        "desc": "Comet AI ассистент",
+        "setup_tip": "https://comet.com",
+    },
+    # 20. VS Code
+    "vscode": {
+        "label": "VS Code",
+        "icon": "📝",
+        "category": "ide",
+        "home": ".vscode",
+        "path": ".vscode/voice-player.json",
+        "event": "afterChat",
+        "entry": _generic_entry,
+        "desc": "Visual Studio Code (Copilot Chat, Continue, Roo Code)",
+        "setup_tip": "https://code.visualstudio.com",
+    },
+    # 21. Aider
+    "aider": {
+        "label": "Aider",
+        "icon": "🤝",
+        "category": "agents",
+        "home": ".aider",
+        "path": ".aider/voice-player.json",
+        "event": "afterAgent",
+        "entry": _generic_entry,
+        "desc": "Aider консольный парный AI-программист",
+        "setup_tip": "pip install aider-chat",
+    },
+    # 22. Windsurf
+    "windsurf": {
+        "label": "Windsurf",
+        "icon": "🏄",
+        "category": "ide",
+        "home": ".codeium",
+        "path": ".codeium/voice-player.json",
+        "event": "afterCascade",
+        "entry": _generic_entry,
+        "desc": "Windsurf IDE (Codeium Cascade AI)",
+        "setup_tip": "https://codeium.com/windsurf",
+    },
+    # 23. Terminal
+    "terminal": {
+        "label": "Terminal",
+        "icon": "📟",
+        "category": "terminal",
+        "home": ".voice-player/terminal",
+        "path": ".voice-player/terminal/config.json",
+        "event": "onOutput",
+        "entry": _generic_entry,
+        "desc": "Универсальный терминал: пайп, логи и vp-say",
+        "setup_tip": "команда | vp-say",
+    },
 }
 
 SELECTION_NOTE = ("Чаты в браузере и приложения (ChatGPT, Claude, Perplexity) хуков не дают: "
@@ -86,9 +356,16 @@ def _has_marker(entry) -> bool:
 
 
 def is_connected(tool_id: str, home: Path = None) -> bool:
-    tool = HOOK_TOOLS[tool_id]
+    tool = HOOK_TOOLS.get(tool_id)
+    if not tool:
+        return False
+    target_home = home or Path.home()
+    if tool_id == "terminal":
+        log_file = target_home / ".voice-player" / "terminal.log"
+        cfg_file = target_home / tool["path"]
+        return log_file.exists() or cfg_file.exists()
     try:
-        cfg = _read_config((home or Path.home()) / tool["path"])
+        cfg = _read_config(target_home / tool["path"])
     except (OSError, ValueError):
         return False
     named = tool.get("named_root")
@@ -101,25 +378,131 @@ def is_connected(tool_id: str, home: Path = None) -> bool:
 
 
 def _is_installed(tool_id: str, home: Path) -> bool:
-    t = HOOK_TOOLS[tool_id]
+    t = HOOK_TOOLS.get(tool_id)
+    if not t:
+        return False
     if (home / t["home"]).exists():
         return True
     if tool_id == "antigravity":
-        return any((home / ".gemini" / p).exists()
-                   for p in ("antigravity", "antigravity-ide", "antigravity-cli"))
-    return False
+        if any((home / ".gemini" / p).exists()
+               for p in ("antigravity", "antigravity-ide", "antigravity-cli")):
+            return True
+
+    # Для изолированных модульных тестов с тестовым каталогом — проверяем только его
+    is_real_user_home = (home == Path.home())
+    if not is_real_user_home:
+        return False
+
+    # Системное обнаружение на реальной машине пользователя
+    if tool_id == "terminal":
+        return True
+    if tool_id == "antigravity":
+        return bool(shutil.which("agy")) or bool(shutil.which("antigravity"))
+    if tool_id == "codex":
+        return bool(shutil.which("codex"))
+    if tool_id == "claude-code":
+        return bool(shutil.which("claude"))
+    if tool_id == "cursor":
+        return ((home / "AppData/Roaming/Cursor").exists()
+                or bool(shutil.which("cursor"))
+                or Path("/Applications/Cursor.app").exists())
+    if tool_id == "gemini":
+        return bool(shutil.which("gemini"))
+    if tool_id == "cline":
+        cline_paths = [
+            home / "AppData/Roaming/Code/User/globalStorage/saoudrizwan.claude-dev",
+            home / ".config/Code/User/globalStorage/saoudrizwan.claude-dev",
+            home / "Library/Application Support/Code/User/globalStorage/saoudrizwan.claude-dev",
+        ]
+        return any(p.exists() for p in cline_paths) or bool(shutil.which("cline"))
+    if tool_id == "copilot-cli":
+        return (bool(shutil.which("copilot"))
+                or bool(shutil.which("github-copilot-cli"))
+                or (home / ".config/gh/extensions/gh-copilot").exists())
+    if tool_id == "ollama":
+        return ((home / "AppData/Local/Programs/Ollama").exists()
+                or bool(shutil.which("ollama")))
+    if tool_id == "vscode":
+        vscode_paths = [
+            home / "AppData/Roaming/Code",
+            home / ".config/Code",
+            home / "Library/Application Support/Code",
+            Path("/Applications/Visual Studio Code.app"),
+        ]
+        return any(p.exists() for p in vscode_paths) or bool(shutil.which("code"))
+    if tool_id == "perplexity":
+        perp_paths = [
+            home / "AppData/Roaming/Perplexity",
+            home / "AppData/Local/Programs/Perplexity",
+            home / ".config/perplexity",
+            Path("/Applications/Perplexity.app"),
+        ]
+        return any(p.exists() for p in perp_paths) or bool(shutil.which("perplexity"))
+    if tool_id == "comet":
+        return (home / "AppData/Roaming/Comet").exists() or bool(shutil.which("comet"))
+    if tool_id == "hermes-desktop":
+        hermes_paths = [
+            home / "AppData/Local/Programs/Hermes",
+            Path("/Applications/Hermes.app"),
+        ]
+        return any(p.exists() for p in hermes_paths) or bool(shutil.which("hermes-desktop"))
+    if tool_id == "aider":
+        return (home / ".aider.chat.history.md").exists() or bool(shutil.which("aider"))
+    if tool_id == "windsurf":
+        wind_paths = [
+            home / "AppData/Roaming/Windsurf",
+            Path("/Applications/Windsurf.app"),
+        ]
+        return any(p.exists() for p in wind_paths) or bool(shutil.which("windsurf"))
+
+    bin_name = tool_id.replace("-code", "").replace("-agent", "").replace("-cli", "")
+    return bool(shutil.which(bin_name))
 
 
 def detect(home: Path = None) -> list:
     """Что установлено на компьютере. Определяем по папке настроек инструмента."""
     home = home or Path.home()
-    return [{"id": tid, "label": t["label"], "installed": _is_installed(tid, home),
-             "connected": is_connected(tid, home)} for tid, t in HOOK_TOOLS.items()]
+    return [{
+        "id": tid,
+        "label": t["label"],
+        "icon": t.get("icon", "🤖"),
+        "category": t.get("category", "agents"),
+        "desc": t.get("desc", ""),
+        "setup_tip": t.get("setup_tip", ""),
+        "installed": _is_installed(tid, home),
+        "connected": is_connected(tid, home)
+    } for tid, t in HOOK_TOOLS.items()]
 
 
 def connect(tool_id: str, app_dir: Path, home: Path = None) -> None:
     tool = HOOK_TOOLS[tool_id]
-    path = (home or Path.home()) / tool["path"]
+    target_home = home or Path.home()
+    path = target_home / tool["path"]
+
+    if tool_id == "terminal":
+        bin_dir = target_home / ".voice-player" / "bin"
+        bin_dir.mkdir(parents=True, exist_ok=True)
+        term_log = target_home / ".voice-player" / "terminal.log"
+        if not term_log.exists():
+            term_log.write_text("# VoicePlayer Terminal Feed\n", encoding="utf-8")
+        feed_script = app_dir / "hooks" / "vp_feed.py"
+        bat_file = bin_dir / "vp-say.bat"
+        sh_file = bin_dir / "vp-say"
+        if getattr(sys, "frozen", False):
+            exe = sys.executable
+            bat_file.write_text(f'@echo off\n"{exe}" --feed terminal %*\n', encoding="utf-8")
+            sh_file.write_text(f'#!/bin/sh\n"{exe}" --feed terminal "$@"\n', encoding="utf-8")
+        else:
+            py = Path(sys.executable)
+            if py.name.lower() == "pythonw.exe":
+                py = py.with_name("python.exe")
+            bat_file.write_text(f'@echo off\n"{py}" "{feed_script}" terminal %*\n', encoding="utf-8")
+            sh_file.write_text(f'#!/bin/sh\n"{py}" "{feed_script}" terminal "$@"\n', encoding="utf-8")
+        try:
+            sh_file.chmod(0o755)
+        except Exception:
+            pass
+
     cfg = _read_config(path)                 # битый файл — исключение, ничего не перезаписываем
     named = tool.get("named_root")
     if named:
@@ -142,9 +525,22 @@ def connect(tool_id: str, app_dir: Path, home: Path = None) -> None:
 
 
 def disconnect(tool_id: str, home: Path = None) -> None:
-    tool = HOOK_TOOLS[tool_id]
-    path = (home or Path.home()) / tool["path"]
-    cfg = _read_config(path)
+    tool = HOOK_TOOLS.get(tool_id)
+    if not tool:
+        return
+    target_home = home or Path.home()
+    path = target_home / tool["path"]
+    if tool_id == "terminal":
+        term_log = target_home / ".voice-player" / "terminal.log"
+        if term_log.exists():
+            try:
+                term_log.unlink()
+            except OSError:
+                pass
+    try:
+        cfg = _read_config(path)
+    except (OSError, ValueError):
+        return
     named = tool.get("named_root")
     if named:
         block = cfg.get(named)

@@ -1,0 +1,21 @@
+# Сборка
+build/
+dist/
+packaging/Output/
+*.spec.bak
+__pycache__/
+*.pyc
+
+# Локальные данные/превью
+_ui_*.png
+_icon_preview.png
+*.log
+.voice-player-*.db
+
+# Сертификаты/ключи подписи — НИКОГДА не коммитим
+*.pfx
+*.cer
+*.crt
+*.key
+*.snk
+*.p12

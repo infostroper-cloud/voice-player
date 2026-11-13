@@ -7804,22 +7804,139 @@ class VoicePlayerApp:
         self._ai_win = w
         w.title(vp_i18n.t("ai_connect_title"))
         w.configure(bg=cc["panel"])
-        self._center_over_root(w, 620, 460)
+        self._center_over_root(w, 720, 560)
         w.transient(self.root)
         self._apply_window_titlebar_theme(w, cc)
         container = ttk.Frame(w, padding=16, style="Panel.TFrame")
         container.pack(fill="both", expand=True)
         self._build_ai_tab(container)
 
+    def _show_ai_setup_dialog(self, tool):
+        w = tk.Toplevel(self.root)
+        w.title(f"{tool['label']} · Инструкция")
+        w.geometry("520x260")
+        self._center_over_root(w, 520, 260)
+        w.transient(self.root)
+        c = getattr(self, "colors", {})
+        panel_bg = getattr(self, "col_panel", "#131615")
+        panel2_bg = c.get("panel2", "#1c211f")
+        w.configure(bg=panel_bg)
+        f = ttk.Frame(w, padding=20, style="Panel.TFrame")
+        f.pack(fill="both", expand=True)
+        ttk.Label(f, text=f"{tool.get('icon', '🤖')} {tool['label']}", font=("Segoe UI Semibold", 13)).pack(anchor="w")
+        ttk.Label(f, text=tool.get('desc', ''), style="Dim.TLabel").pack(anchor="w", pady=(4, 12))
+
+        tip = tool.get("setup_tip") or "https://github.com"
+        ttk.Label(f, text="Команда установки или ссылка:", font=("Segoe UI Semibold", 9)).pack(anchor="w")
+
+        entry = tk.Entry(f, bg=panel2_bg, fg=self.col_ink, insertbackground=self.col_ink,
+                         relief="flat", highlightthickness=1, highlightbackground=self.col_hairline)
+        entry.insert(0, tip)
+        entry.configure(state="readonly")
+        entry.pack(fill="x", pady=(4, 16), ipady=4)
+
+        btn_bar = ttk.Frame(f, style="Panel.TFrame")
+        btn_bar.pack(fill="x")
+
+        def copy_cmd():
+            self.root.clipboard_clear()
+            self.root.clipboard_append(tip)
+            self._set_status(f"Скопировано: {tip}", ok=True)
+            w.destroy()
+
+        def open_url():
+            import webbrowser
+            if tip.startswith("http"):
+                webbrowser.open(tip)
+            else:
+                copy_cmd()
+            w.destroy()
+
+        ttk.Button(btn_bar, text="Скопировать команду", style="Primary.TButton", command=copy_cmd).pack(side="left", padx=(0, 8))
+        if tip.startswith("http"):
+            ttk.Button(btn_bar, text="Открыть сайт", command=open_url).pack(side="left")
+        ttk.Button(btn_bar, text="Закрыть", command=w.destroy).pack(side="right")
+
     def _build_ai_tab(self, tab):
         for w in tab.winfo_children():
             w.destroy()
-        tab.columnconfigure(1, weight=1)
         bold_f = ("Segoe UI Semibold", 10)
-        ttk.Label(tab, text=vp_i18n.t("ai_connect_title"), font=bold_f).grid(
-            row=0, column=0, columnspan=3, sticky="w", pady=(0, 4))
-        ttk.Label(tab, text=vp_i18n.t("ai_connect_desc"),
-                  style="Dim.TLabel", justify="left").grid(row=1, column=0, columnspan=3, sticky="w", pady=(0, 8))
+        c = getattr(self, "colors", {})
+        panel_bg = getattr(self, "col_panel", "#131615")
+        panel2_bg = c.get("panel2", "#1c211f")
+        signal_col = getattr(self, "col_signal", "#7ee2b8")
+        hairline_col = getattr(self, "col_hairline", "#232927")
+
+        cur_filter = getattr(self, "_ai_filter", "all")
+
+        # Верхний заголовок и описание
+        top_box = ttk.Frame(tab, style="Panel.TFrame")
+        top_box.pack(fill="x", pady=(0, 6))
+
+        title_row = ttk.Frame(top_box, style="Panel.TFrame")
+        title_row.pack(fill="x")
+        ttk.Label(title_row, text=vp_i18n.t("ai_connect_title"), font=("Segoe UI Semibold", 12)).pack(side="left")
+
+        ttk.Button(title_row, text=vp_i18n.t("pull_recent_ai_btn"), style="Primary.TButton",
+                   command=lambda: self._pull_recent_ai(limit_per_source=8, silent=False)).pack(side="right")
+
+        ttk.Label(top_box, text=vp_i18n.t("ai_connect_desc"),
+                  style="Dim.TLabel", justify="left").pack(anchor="w", pady=(2, 6))
+
+        # Панель категорий (быстрые фильтры)
+        cat_bar = ttk.Frame(top_box, style="Panel.TFrame")
+        cat_bar.pack(fill="x", pady=(0, 6))
+
+        cats = [
+            ("all", "Все (23)"),
+            ("agents", "Агенты"),
+            ("ide", "IDE"),
+            ("cli", "CLI"),
+            ("local_llm", "Локальные LLM"),
+            ("chat", "Чат и Поиск"),
+            ("terminal", "Терминал"),
+        ]
+
+        def set_filter(cat_id):
+            self._ai_filter = cat_id
+            self._build_ai_tab(tab)
+
+        for cid, clbl in cats:
+            is_active = (cur_filter == cid)
+            ttk.Button(cat_bar, text=clbl,
+                       style="Primary.TButton" if is_active else "TButton",
+                       command=lambda c=cid: set_filter(c)).pack(side="left", padx=(0, 4))
+
+        # Скроллируемая область с карточками нейросетей
+        box = ttk.Frame(tab, style="Panel.TFrame")
+        box.pack(fill="both", expand=True)
+
+        canvas = tk.Canvas(box, bg=panel_bg, highlightthickness=0, bd=0)
+        sb = ttk.Scrollbar(box, orient="vertical", command=canvas.yview)
+        inner = ttk.Frame(canvas, style="Panel.TFrame")
+
+        inner_win = canvas.create_window((0, 0), window=inner, anchor="nw")
+
+        def _on_cfg(event):
+            canvas.configure(scrollregion=canvas.bbox("all"))
+
+        def _on_canv_cfg(event):
+            canvas.itemconfig(inner_win, width=event.width)
+
+        inner.bind("<Configure>", _on_cfg)
+        canvas.bind("<Configure>", _on_canv_cfg)
+        canvas.configure(yscrollcommand=sb.set)
+
+        def _on_mw(e):
+            if canvas.winfo_exists():
+                canvas.yview_scroll(int(-1 * (e.delta / 120)), "units")
+
+        canvas.bind("<Enter>", lambda _e: canvas.bind_all("<MouseWheel>", _on_mw))
+        canvas.bind("<Leave>", lambda _e: canvas.unbind_all("<MouseWheel>"))
+        canvas.bind("<Destroy>", lambda _e: canvas.unbind_all("<MouseWheel>"))
+
+        canvas.pack(side="left", fill="both", expand=True)
+        sb.pack(side="right", fill="y")
 
         def toggle(tool):
             tid = tool["id"]
@@ -7846,37 +7963,70 @@ class VoicePlayerApp:
             self._build_ai_tab(tab)
             self._refresh_ai_badge()
 
-        row = 2
-        for tool in vp_integrations.detect():
+        # Строим строки для каждого инструмента
+        all_tools = vp_integrations.detect()
+        filtered = [t for t in all_tools if cur_filter == "all" or t.get("category") == cur_filter]
+
+        for row_i, tool in enumerate(filtered):
             tid = tool["id"]
+            icon = tool.get("icon", "🤖")
             lbl = tool["label"]
-            if tid == "codex":
-                lbl = "Codex (App + CLI)"
-            ttk.Label(tab, text=lbl, font=bold_f).grid(row=row, column=0, sticky="w", pady=(8, 0))
+
+            row_frame = tk.Frame(inner, bg=panel2_bg, highlightthickness=1,
+                                 highlightbackground=hairline_col, padx=10, pady=8)
+            row_frame.pack(fill="x", pady=3, padx=2)
+
+            # Левая колонка: Иконка + Название + Описание
+            left = tk.Frame(row_frame, bg=panel2_bg)
+            left.pack(side="left", fill="y")
+
+            icon_lbl = tk.Label(left, text=icon, font=("Segoe UI Emoji", 14), bg=panel2_bg, fg=signal_col)
+            icon_lbl.pack(side="left", padx=(0, 8))
+
+            name_box = tk.Frame(left, bg=panel2_bg)
+            name_box.pack(side="left")
+            tk.Label(name_box, text=lbl, font=bold_f, bg=panel2_bg, fg=self.col_ink).pack(anchor="w")
+            desc = tool.get("desc") or ""
+            if desc:
+                tk.Label(name_box, text=desc, font=("Segoe UI", 8), bg=panel2_bg, fg=self.col_mute).pack(anchor="w")
+
+            # Правая колонка: Статус + Кнопка
+            right = tk.Frame(row_frame, bg=panel2_bg)
+            right.pack(side="right")
+
             if not tool["installed"]:
-                state = vp_i18n.t("not_found")
+                state_text = "⬛ " + vp_i18n.t("not_found")
+                state_fg = self.col_mute
             elif tool["connected"]:
-                if tid in ("antigravity", "codex"):
-                    state = vp_i18n.t("reads_dialogs_hooks")
+                if tid == "terminal":
+                    state_text = "🟢 Пайп и vp-say активны"
+                elif tid in ("antigravity", "codex", "cline"):
+                    state_text = "🟢 " + vp_i18n.t("reads_dialogs_hooks")
                 else:
-                    state = vp_i18n.t("reads_dialogs_stop")
+                    state_text = "🟢 " + vp_i18n.t("reads_dialogs_stop")
+                state_fg = signal_col
             else:
-                state = vp_i18n.t("installed_ready")
-            ttk.Label(tab, text=state, style="Dim.TLabel").grid(row=row, column=1, sticky="w", padx=(12, 0), pady=(8, 0))
+                state_text = "⚪ " + vp_i18n.t("installed_ready")
+                state_fg = self.col_ink
+
+            tk.Label(right, text=state_text, font=("Segoe UI", 9), bg=panel2_bg, fg=state_fg).pack(side="left", padx=(0, 12))
+
             if tool["installed"]:
-                ttk.Button(tab, text=vp_i18n.t("disconnect") if tool["connected"] else vp_i18n.t("connect"),
-                           style="Toggle.TButton" if tool["connected"] else "Primary.TButton",
-                           command=lambda t=tool: toggle(t)).grid(row=row, column=2, sticky="e", pady=(8, 0))
-            row += 1
+                btn_txt = vp_i18n.t("disconnect") if tool["connected"] else vp_i18n.t("connect")
+                btn_style = "Toggle.TButton" if tool["connected"] else "Primary.TButton"
+                ttk.Button(right, text=btn_txt, style=btn_style,
+                           command=lambda t=tool: toggle(t)).pack(side="left")
+            else:
+                ttk.Button(right, text="Инструкция",
+                           command=lambda t=tool: self._show_ai_setup_dialog(t)).pack(side="left")
 
-        act_bar = ttk.Frame(tab, style="Panel.TFrame")
-        act_bar.grid(row=row, column=0, columnspan=3, sticky="ew", pady=(16, 4))
-        ttk.Button(act_bar, text=vp_i18n.t("pull_recent_ai_btn"), style="Primary.TButton",
-                   command=lambda: self._pull_recent_ai(limit_per_source=8, silent=False)).pack(side="left")
-        row += 1
-
-        ttk.Label(tab, text=vp_i18n.t("ai_selection_note"), style="Dim.TLabel", wraplength=560,
-                  justify="left").grid(row=row, column=0, columnspan=3, sticky="w", pady=(12, 0))
+        # Нижняя подсказка
+        foot_box = ttk.Frame(tab, style="Panel.TFrame")
+        foot_box.pack(fill="x", pady=(8, 0))
+        ttk.Label(foot_box, text="💡 " + vp_i18n.t("ai_selection_note"), style="Dim.TLabel",
+                  wraplength=640, justify="left").pack(anchor="w")
+        ttk.Label(foot_box, text="📟 Терминал: любая команда | vp-say  (или Ctrl+Alt+S для озвучки выделенного текста)",
+                  style="Dim.TLabel", justify="left").pack(anchor="w", pady=(2, 0))
 
     def _tray_quit(self):
         try:

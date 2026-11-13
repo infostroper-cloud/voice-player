@@ -27,7 +27,7 @@ from tkinter import ttk, filedialog, messagebox
 NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 PY_INSTALLER_URL = "https://www.python.org/ftp/python/3.12.8/python-3.12.8-amd64.exe"
 
-APP_VERSION_DEFAULT = "1.2.1"
+APP_VERSION_DEFAULT = "1.2.2"
 
 LICENSE_TEXT = """ЛИЦЕНЗИОННОЕ СОГЛАШЕНИЕ С КОНЕЧНЫМ ПОЛЬЗОВАТЕЛЕМ (EULA)
 для программного обеспечения «VoicePlayer» (версия 1.2.x и последующие)
