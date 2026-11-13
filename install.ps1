@@ -1,6 +1,4 @@
-﻿# VoicePlayer Windows Installer - Zero-SmartScreen
-# https://github.com/infostroper-cloud/voice-player
-
+$ErrorActionPreference = 'Stop'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 $ErrorActionPreference = "Stop"
 

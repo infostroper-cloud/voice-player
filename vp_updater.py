@@ -411,7 +411,8 @@ best = vp_updater.best_installed()
 if best:
     target = best
 vp_updater._note_start(target)
-subprocess.Popen([vp_updater.gui_python(), str(target / "app.py")], cwd=str(target))
+flags = 0x00000008 if sys.platform == "win32" else 0
+subprocess.Popen([vp_updater.gui_python(), str(target / "app.py")], cwd=str(target), creationflags=flags)
 '''
 
 
@@ -470,13 +471,16 @@ $dirsToClean = @(
 )
 try {
     $regDesk = (Get-ItemProperty "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders" -ErrorAction SilentlyContinue).Desktop
-    if ($regDesk) { $dirsToClean += $regDesk }
+    if ($regDesk) { $dirsToClean += [Environment]::ExpandEnvironmentVariables($regDesk) }
 } catch {}
 
+$targetPatterns = @("VoicePlayer.lnk", "VoicePlayer*.lnk", "*VoicePlayer*", "VoicePlayer.url")
 foreach ($d in ($dirsToClean | Select-Object -Unique)) {
     if ($d -and (Test-Path $d)) {
-        Get-ChildItem -Path $d -Filter "*VoicePlayer*" -Recurse -ErrorAction SilentlyContinue | ForEach-Object {
-            Remove-Item $_.FullName -Force -Recurse -ErrorAction SilentlyContinue
+        foreach ($pat in $targetPatterns) {
+            Get-Item (Join-Path $d $pat) -ErrorAction SilentlyContinue | ForEach-Object {
+                Remove-Item $_.FullName -Force -Recurse -ErrorAction SilentlyContinue
+            }
         }
     }
 }

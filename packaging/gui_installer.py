@@ -107,6 +107,17 @@ def _bundled_zip() -> Path:
     root_zips = sorted(Path(__file__).resolve().parents[1].glob("voice-player-*.zip"))
     if root_zips:
         return root_zips[-1]
+    # Резервная загрузка архива релиза с GitHub, если exe запущен автономно
+    try:
+        import tempfile, urllib.request
+        target_zip = Path(tempfile.gettempdir()) / f"voice-player-{APP_VERSION_DEFAULT}.zip"
+        if not target_zip.is_file() or target_zip.stat().st_size < 10000:
+            url = f"https://github.com/infostroper-cloud/voice-player/releases/download/voice-player-v{APP_VERSION_DEFAULT}/voice-player-{APP_VERSION_DEFAULT}.zip"
+            urllib.request.urlretrieve(url, str(target_zip))
+        if target_zip.is_file() and target_zip.stat().st_size > 10000:
+            return target_zip
+    except Exception:
+        pass
     raise FileNotFoundError("Внутри установщика не найден архив voice-player-*.zip")
 
 
@@ -248,12 +259,31 @@ class ClassicInstallerWizard:
             except Exception:
                 pass
 
-        ico = _res_dir() / "icon.ico"
-        if not ico.is_file():
-            ico = Path(__file__).resolve().parents[1] / "icon.ico"
-        if ico.is_file():
+        if sys.platform == "win32":
             try:
-                self.root.iconbitmap(default=str(ico))
+                ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("VoicePlayer.Installer")
+            except Exception:
+                pass
+
+        ico_candidates = [
+            _res_dir() / "icon.ico",
+            Path(getattr(sys, "_MEIPASS", "")) / "icon.ico",
+            Path(__file__).resolve().parent / "icon.ico",
+            Path(__file__).resolve().parents[1] / "icon.ico",
+            Path(os.environ.get("LOCALAPPDATA", "")) / "Programs" / "VoicePlayer" / "icon.ico",
+            Path.home() / ".voice-player" / "icon.ico",
+        ]
+        self.installer_ico = next((c for c in ico_candidates if c and c.is_file()), None)
+        if self.installer_ico:
+            try:
+                self.root.iconbitmap(str(self.installer_ico))
+            except Exception:
+                pass
+            try:
+                from PIL import Image, ImageTk
+                img = Image.open(str(self.installer_ico))
+                self._icon_img = ImageTk.PhotoImage(img.resize((32, 32)))
+                self.root.iconphoto(True, self._icon_img)
             except Exception:
                 pass
 
@@ -484,11 +514,18 @@ class ClassicInstallerWizard:
                          padx=16, pady=14)
         card2.pack(fill="x")
 
-        tk.Label(card2, text="Автозапуск:", bg="#181d1b", fg="#7ee2b8",
+        tk.Label(card2, text="Параметры запуска программы:", bg="#181d1b", fg="#7ee2b8",
                  font=("Segoe UI Semibold", 9), anchor="w").pack(fill="x", pady=(0, 6))
 
+        cb_launch = tk.Checkbutton(
+            card2, text="Запустить VoicePlayer сразу после завершения установки", variable=self.var_launch_now,
+            bg="#181d1b", fg="#e8ecea", selectcolor="#1c211f", activebackground="#181d1b",
+            activeforeground="#7ee2b8", font=("Segoe UI", 9), cursor="hand2"
+        )
+        cb_launch.pack(anchor="w", pady=(0, 4))
+
         cb_auto = tk.Checkbutton(
-            card2, text="Запускать VoicePlayer при входе в Windows", variable=self.var_autostart,
+            card2, text="Запускать VoicePlayer при входе в Windows (автозапуск)", variable=self.var_autostart,
             bg="#181d1b", fg="#e8ecea", selectcolor="#1c211f", activebackground="#181d1b",
             activeforeground="#7ee2b8", font=("Segoe UI", 9), cursor="hand2"
         )
@@ -663,7 +700,7 @@ class ClassicInstallerWizard:
         self.lbl_install_detail.configure(text=f"Произошла ошибка:\n{err}")
         self.btn_back.configure(state="normal")
         self.btn_cancel.configure(state="normal")
-        messagebox.showerror("Ошибка установки VoicePlayer", f"Не удалось завершить установку:\n{err}")
+        messagebox.showerror("Ошибка установки VoicePlayer", f"Не удалось завершить установку:\n{err}", parent=self.root)
 
     def _finish_and_launch(self):
         if self.var_launch_now.get():
@@ -673,10 +710,11 @@ class ClassicInstallerWizard:
             py = _find_system_python() or sys.executable
             pyw = str(Path(py).with_name("pythonw.exe")) if Path(py).with_name("pythonw.exe").is_file() else py
             try:
+                flags = 0x00000008 if sys.platform == "win32" else 0  # DETACHED_PROCESS
                 if launch_cmd.is_file():
-                    subprocess.Popen([str(launch_cmd)], creationflags=NO_WINDOW)
+                    subprocess.Popen(["cmd.exe", "/c", str(launch_cmd)], creationflags=flags)
                 elif launch_pyw.is_file():
-                    subprocess.Popen([pyw, str(launch_pyw)], creationflags=NO_WINDOW)
+                    subprocess.Popen([pyw, str(launch_pyw)], cwd=str(dest), creationflags=flags)
             except Exception:
                 pass
         self.root.destroy()

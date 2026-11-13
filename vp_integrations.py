@@ -226,9 +226,8 @@ HOOK_TOOLS = {
         "category": "agents",
         "home": "AppData/Local/Programs/DeepSeek Harness",
         "path": "AppData/Roaming/@deepseek-ai/dsh-desktop/config.json",
-        "event": "afterResponse",
-        "entry": _generic_entry,
-        "desc": "DeepSeek десктоп-агент и траектории",
+        "is_gui_app": True,
+        "desc": "DeepSeek десктоп-приложение (озвучка: буфер 📋 или Ctrl+Shift+S)",
         "setup_tip": "https://deepseek.com",
     },
     # 16. Qwen Code
@@ -249,10 +248,9 @@ HOOK_TOOLS = {
         "icon": "🦙",
         "category": "local_llm",
         "home": ".ollama",
-        "path": ".ollama/voice-player.json",
-        "event": "onGeneration",
-        "entry": _generic_entry,
-        "desc": "Локальные модели LLaMA, Mistral, DeepSeek, Qwen",
+        "path": ".ollama/config.json",
+        "is_gui_app": True,
+        "desc": "Локальные модели (терминал: ollama run | vp-say, либо авто-буфер 📋)",
         "setup_tip": "https://ollama.com",
     },
     # 18. Perplexity
@@ -262,9 +260,8 @@ HOOK_TOOLS = {
         "category": "chat",
         "home": ".perplexity",
         "path": ".perplexity/settings.json",
-        "event": "onResponse",
-        "entry": _generic_entry,
-        "desc": "Perplexity AI поиск и десктопное приложение",
+        "is_gui_app": True,
+        "desc": "Perplexity AI поиск (озвучка: буфер 📋 или Ctrl+Shift+S)",
         "setup_tip": "https://perplexity.ai",
     },
     # 19. Comet
@@ -274,9 +271,8 @@ HOOK_TOOLS = {
         "category": "chat",
         "home": "AppData/Local/Perplexity/Comet",
         "path": "AppData/Local/Perplexity/Comet/settings.json",
-        "event": "onResponse",
-        "entry": _generic_entry,
-        "desc": "AI-браузер Comet от Perplexity",
+        "is_gui_app": True,
+        "desc": "AI-браузер Comet от Perplexity (озвучка: буфер 📋 или Ctrl+Shift+S)",
         "setup_tip": "https://perplexity.ai/comet",
     },
     # 20. VS Code
@@ -314,6 +310,17 @@ HOOK_TOOLS = {
         "entry": _generic_entry,
         "desc": "Windsurf IDE (Codeium Cascade AI)",
         "setup_tip": "https://codeium.com/windsurf",
+    },
+    # Kimi Desktop
+    "kimi": {
+        "label": "Kimi (Moonshot AI)",
+        "icon": "🌙",
+        "category": "chat",
+        "home": "AppData/Local/Programs/kimi-desktop",
+        "path": "AppData/Local/Programs/kimi-desktop/Kimi.exe",
+        "is_gui_app": True,
+        "desc": "Kimi AI десктоп-чат (озвучка: кнопка 📋 или Ctrl+Shift+S)",
+        "setup_tip": "https://kimi.moonshot.cn",
     },
     # 23. Terminal
     "terminal": {
@@ -359,6 +366,8 @@ def is_connected(tool_id: str, home: Path = None) -> bool:
     tool = HOOK_TOOLS.get(tool_id)
     if not tool:
         return False
+    if tool.get("is_gui_app"):
+        return _is_installed(tool_id, home or Path.home())
     target_home = home or Path.home()
     if tool_id == "terminal":
         log_file = target_home / ".voice-player" / "terminal.log"
@@ -373,8 +382,11 @@ def is_connected(tool_id: str, home: Path = None) -> bool:
         block = cfg.get(named)
         if not isinstance(block, dict) or block.get("enabled") is False:
             return False
-        return any(_has_marker(e) for e in block.get(tool["event"]) or [])
-    return any(_has_marker(e) for e in (cfg.get("hooks") or {}).get(tool["event"]) or [])
+        return any(_has_marker(e) for e in block.get(tool.get("event", "onMessage")) or [])
+    event = tool.get("event")
+    if not event:
+        return False
+    return any(_has_marker(e) for e in (cfg.get("hooks") or {}).get(event) or [])
 
 
 def _is_installed(tool_id: str, home: Path) -> bool:
@@ -447,6 +459,14 @@ def _is_installed(tool_id: str, home: Path) -> bool:
             Path("/Applications/Comet.app"),
         ]
         return any(p.exists() for p in comet_paths) or bool(shutil.which("comet"))
+    if tool_id == "kimi":
+        kimi_paths = [
+            home / "AppData/Local/Programs/kimi-desktop/Kimi.exe",
+            home / "AppData/Local/Programs/kimi-desktop",
+            home / "AppData/Roaming/Kimi",
+            Path("/Applications/Kimi.app"),
+        ]
+        return any(p.exists() for p in kimi_paths) or bool(shutil.which("kimi"))
     if tool_id == "deepseek":
         dsh_paths = [
             home / "AppData/Local/Programs/DeepSeek Harness",
@@ -487,6 +507,7 @@ def detect(home: Path = None) -> list:
         "category": t.get("category", "agents"),
         "desc": t.get("desc", ""),
         "setup_tip": t.get("setup_tip", ""),
+        "is_gui_app": bool(t.get("is_gui_app", False)),
         "installed": _is_installed(tid, home),
         "connected": is_connected(tid, home)
     } for tid, t in HOOK_TOOLS.items()]

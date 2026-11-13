@@ -45,6 +45,54 @@ import vp_i18n
 from vp_i18n import t
 from vp_tables import find_tables, html_to_markdown, normalize_tables
 
+# Автоматический перехватчик messagebox для 100% мультиязычности диалогов
+def _install_i18n_messagebox():
+    orig_info = messagebox.showinfo
+    orig_warn = messagebox.showwarning
+    orig_err = messagebox.showerror
+    orig_askyesno = messagebox.askyesno
+    orig_askokcancel = messagebox.askokcancel
+
+    PREFIX_MAP = {
+        "Не удалось сохранить:\n": "msg_save_failed",
+        "Не удалось начать запись:\n": "msg_rec_start_failed",
+        "Ошибка записи:\n": "msg_rec_error",
+        "Не удалось начать запись системного звука:\n": "msg_sysrec_start_failed",
+        "Не удалось включить live:\n": "msg_live_start_failed",
+        "Не удалось:\n": "msg_action_failed",
+        "Не удалось включить запись:\n": "msg_rec_start_failed",
+        "Telegram: ": "msg_telegram_err",
+        "Кэш: ": "msg_cache_info",
+        "База доски не найдена:\n": "msg_board_db_missing",
+        "Не удалось загрузить историю:\n": "msg_history_load_failed",
+        "Не удалось собрать лог: ": "msg_diag_failed",
+        "Не удалось сохранить текст:\n": "msg_text_save_failed",
+        "Не удалось сохранить аудио:\n": "msg_audio_save_failed",
+        "Не удалось сохранить субтитры:\n": "msg_subtitles_save_failed",
+    }
+
+    def _tr(msg):
+        if not isinstance(msg, str):
+            return msg
+        # Прямой перевод ключа или точной фразы
+        translated = vp_i18n.t(msg)
+        if translated != msg or msg in vp_i18n.STRINGS.get(vp_i18n.get_lang(), {}):
+            return translated
+        # Префиксный перевод для сообщений об ошибках с динамическим исключением
+        for pfx, key in PREFIX_MAP.items():
+            if msg.startswith(pfx):
+                suffix = msg[len(pfx):]
+                return vp_i18n.t(key, err=suffix, path=suffix)
+        return translated
+
+    messagebox.showinfo = lambda title, message, **kw: orig_info(title, _tr(message), **kw)
+    messagebox.showwarning = lambda title, message, **kw: orig_warn(title, _tr(message), **kw)
+    messagebox.showerror = lambda title, message, **kw: orig_err(title, _tr(message), **kw)
+    messagebox.askyesno = lambda title, message, **kw: orig_askyesno(title, _tr(message), **kw)
+    messagebox.askokcancel = lambda title, message, **kw: orig_askokcancel(title, _tr(message), **kw)
+
+_install_i18n_messagebox()
+
 # ============================ ВИНДОВЫЕ ИНТЕГРАЦИИ ============================
 
 # AppUserModelID — чтобы Windows распознавал нас как отдельное приложение
@@ -2194,7 +2242,7 @@ class VoicePlayerApp:
         self.var_voice     = tk.StringVar(value=_vlabel)
         self._muted        = set(self.prefs.get("muted", []))   # авторы, которых не озвучиваем
         self.var_mode      = tk.StringVar(value=self.prefs.get("mode", "Очередь"))
-        self.var_autoclip  = tk.BooleanVar(value=False)         # авто-озвучка буфера (не персистим)
+        self.var_autoclip  = tk.BooleanVar(value=bool(self.prefs.get("autoclip", False)))  # авто-озвучка буфера (сохраняем)
         self._last_clip    = ""
         self.var_search    = tk.StringVar(value="")
         self.var_search.trace_add("write", lambda *_: self._on_search_change())
@@ -2639,22 +2687,31 @@ class VoicePlayerApp:
         c = c or getattr(self, "colors", None) or self._palette(
             self.var_theme.get() if hasattr(self, "var_theme") else "Тёмная"
         )
-        dark = str(self.var_theme.get()).lower().startswith("т") if hasattr(self, "var_theme") else True
+        th = str(self.var_theme.get() if hasattr(self, "var_theme") else "Тёмная").lower()
+        dark = th.startswith(("т", "d", "dark", "oled", "ч", "black")) or str(c.get("bg", "#00")).startswith(("#0", "#1", "#2"))
         try:
             win.update_idletasks()
             wid = win.winfo_id()
-            hwnd = ctypes.windll.user32.GetParent(wid) or wid
+            user32 = ctypes.windll.user32
             dwmapi = ctypes.windll.dwmapi
+
+            # Получаем реальные HWND: и внутренний клиентский, и корневое окно верхнего уровня
+            h_root = user32.GetAncestor(wid, 2)  # GA_ROOT
+            h_parent = user32.GetParent(wid)
+            hwnds = set(h for h in (wid, h_root, h_parent) if h)
+
             dark_val = ctypes.c_int(1 if dark else 0)
-            for attr in (20, 19):  # DWMWA_USE_IMMERSIVE_DARK_MODE
-                dwmapi.DwmSetWindowAttribute(hwnd, attr, ctypes.byref(dark_val), ctypes.sizeof(dark_val))
-            cap_col = ctypes.c_uint(self._hex_to_colorref(c["panel"]))
-            txt_col = ctypes.c_uint(self._hex_to_colorref(c["ink"]))
-            brd_col = ctypes.c_uint(self._hex_to_colorref(c["hairline"]))
-            dwmapi.DwmSetWindowAttribute(hwnd, 35, ctypes.byref(cap_col), ctypes.sizeof(cap_col))  # DWMWA_CAPTION_COLOR
-            dwmapi.DwmSetWindowAttribute(hwnd, 36, ctypes.byref(txt_col), ctypes.sizeof(txt_col))  # DWMWA_TEXT_COLOR
-            dwmapi.DwmSetWindowAttribute(hwnd, 34, ctypes.byref(brd_col), ctypes.sizeof(brd_col))  # DWMWA_BORDER_COLOR
-            ctypes.windll.user32.SetWindowPos(hwnd, 0, 0, 0, 0, 0, 0x0027)  # SWP_FRAMECHANGED
+            cap_col = ctypes.c_uint(self._hex_to_colorref(c.get("panel", "#131615") if dark else c.get("panel", "#ffffff")))
+            txt_col = ctypes.c_uint(self._hex_to_colorref(c.get("ink", "#e8ecea") if dark else c.get("ink", "#161a18")))
+            brd_col = ctypes.c_uint(self._hex_to_colorref(c.get("hairline", "#232927") if dark else c.get("hairline", "#d5ddd9")))
+
+            for h in hwnds:
+                for attr in (20, 19):  # DWMWA_USE_IMMERSIVE_DARK_MODE
+                    dwmapi.DwmSetWindowAttribute(h, attr, ctypes.byref(dark_val), ctypes.sizeof(dark_val))
+                dwmapi.DwmSetWindowAttribute(h, 35, ctypes.byref(cap_col), ctypes.sizeof(cap_col))  # DWMWA_CAPTION_COLOR
+                dwmapi.DwmSetWindowAttribute(h, 36, ctypes.byref(txt_col), ctypes.sizeof(txt_col))  # DWMWA_TEXT_COLOR
+                dwmapi.DwmSetWindowAttribute(h, 34, ctypes.byref(brd_col), ctypes.sizeof(brd_col))  # DWMWA_BORDER_COLOR
+                user32.SetWindowPos(h, 0, 0, 0, 0, 0, 0x0027)  # SWP_FRAMECHANGED
         except Exception:
             pass
 
@@ -3400,6 +3457,12 @@ class VoicePlayerApp:
         self._accent_colors = {"Мята": "#7ee2b8", "Красный": "#fc3c44", "Синий": "#0a84ff",
                                "Графит": "#48484a", "Зелёный": "#34c759", "Фиолетовый": "#af52de"}
         self.var_theme = tk.StringVar(value=self.prefs.get("theme", "Тёмная"))
+        self.var_hotkey_speak = tk.StringVar(value=self.prefs.get("hotkey_speak", "Ctrl + Shift + S"))
+        self.var_hotkey_dictate = tk.StringVar(value=self.prefs.get("hotkey_dictate", "Ctrl + Shift + D"))
+        self.var_hotkey_toggle = tk.StringVar(value=self.prefs.get("hotkey_toggle", "Ctrl + Shift + P"))
+        self.var_hotkey_double_c = tk.BooleanVar(value=bool(self.prefs.get("hotkey_double_ctrl_c", True)))
+        self.var_hotkey_media = tk.BooleanVar(value=bool(self.prefs.get("hotkey_media_keys", True)))
+
         self.var_sleep = tk.StringVar(value=vp_i18n.t("off"))
         self.var_accent = tk.StringVar(value=next(
             (k for k, v in self._accent_colors.items() if v == self.prefs.get("accent", "#7ee2b8")),
@@ -4976,6 +5039,10 @@ class VoicePlayerApp:
     def _open_settings(self, select_tab: str = ""):
         c = self.colors
         win = tk.Toplevel(self.root); win.title(vp_i18n.t("settings"))
+        self._apply_window_titlebar_theme(win, c)
+        win.after(30, lambda w=win: self._apply_window_titlebar_theme(w))
+        win.after(150, lambda w=win: self._apply_window_titlebar_theme(w))
+        win.bind("<Map>", lambda e, w=win: self._apply_window_titlebar_theme(w), add="+")
 
         tab_titles = [
             vp_i18n.t("tab_playback"),
@@ -5130,55 +5197,77 @@ class VoicePlayerApp:
         ttk.Label(t3, text=vp_i18n.t("font_hint"),
                   style="Dim.TLabel").grid(row=4, column=0, columnspan=2, sticky="w", pady=(8, 0))
 
-        # — Горячие клавиши —
+        # — Горячие клавиши — Интерактивная настройка под пользователя
         t_shortcuts = tab(vp_i18n.t("tab_shortcuts"))
-        ttk.Label(t_shortcuts, text=vp_i18n.t("global_shortcuts_title"), font=("Segoe UI Semibold", 9)).grid(
-            row=0, column=0, columnspan=2, sticky="w", pady=(0, 6))
+        ttk.Label(t_shortcuts, text=vp_i18n.t("custom_hotkeys_title"), font=("Segoe UI Semibold", 11)).grid(
+            row=0, column=0, columnspan=2, sticky="w", pady=(0, 2))
+        ttk.Label(t_shortcuts, text=vp_i18n.t("custom_hotkeys_desc"), style="Dim.TLabel").grid(
+            row=1, column=0, columnspan=2, sticky="w", pady=(0, 12))
 
-        glob_box = ttk.Frame(t_shortcuts, style="Panel.TFrame")
-        glob_box.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(0, 10))
-        glob_box.columnconfigure(1, weight=1)
+        # Выпадающие списки выбора клавиш
+        hk_grid = ttk.Frame(t_shortcuts)
+        hk_grid.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(0, 10))
+        hk_grid.columnconfigure(1, weight=1)
 
-        is_mac = sys.platform == "darwin"
-        global_key1 = "Cmd + Shift + S" if is_mac else "Ctrl + Alt + S"
-        global_key2 = "Cmd + Shift + P" if is_mac else "Ctrl + Alt + P"
-
-        tk.Label(glob_box, text=global_key1, font=("Segoe UI Semibold", 9), bg=c["panel2"], fg=c["signal"],
-                 padx=8, pady=3, relief="flat", bd=0).grid(row=0, column=0, padx=(0, 8), pady=2, sticky="w")
-        ttk.Label(glob_box, text=vp_i18n.t("speak_selection_hint")).grid(row=0, column=1, sticky="w")
-
-        tk.Label(glob_box, text=global_key2, font=("Segoe UI Semibold", 9), bg=c["panel2"], fg=c["signal"],
-                 padx=8, pady=3, relief="flat", bd=0).grid(row=1, column=0, padx=(0, 8), pady=2, sticky="w")
-        ttk.Label(glob_box, text=f"{vp_i18n.t('play')} / {vp_i18n.t('pause')} ({vp_i18n.t('mode')})").grid(row=1, column=1, sticky="w")
-
-        quick_keys = [
-            ("Space / K", f"{vp_i18n.t('play')} / {vp_i18n.t('pause')}"),
-            ("Ctrl + Enter", vp_i18n.t("speak_btn")),
-            ("→  /  ←", f"{vp_i18n.t('next')} / {vp_i18n.t('prev')}"),
-            ("Ctrl + → / ←", "±10s Seek"),
-            ("Ctrl + 1 / 2 / 3 / 4", "1.0× / 1.25× / 1.5× / 2.0× Speed"),
-            ("Ctrl + ,", vp_i18n.t("settings")),
-            ("Ctrl + M", vp_i18n.t("opt_dnd")),
-            ("Ctrl + T", vp_i18n.t("tools")),
-            ("Ctrl + L", vp_i18n.t("reset")),
-            ("Ctrl + D", vp_i18n.t("dictate")),
-            ("Ctrl + Shift + T", f"{vp_i18n.t('theme')} (Dark / Light)"),
-            ("Ctrl + Shift + M", vp_i18n.t("mini_player")),
+        speak_options = [
+            "Ctrl + Shift + S",
+            "Ctrl + Alt + S",
+            "Win + Alt + S",
+            "Ctrl + Shift + X",
+            "Ctrl + Shift + A",
+            "F9",
+            "F10",
+            "F12",
         ]
-        q_frame = ttk.Frame(t_shortcuts)
-        q_frame.grid(row=2, column=0, columnspan=2, sticky="nsew", pady=(0, 10))
-        q_frame.columnconfigure(0, minsize=140)
-        q_frame.columnconfigure(1, weight=1)
+        dictate_options = [
+            "Ctrl + Shift + D",
+            "Ctrl + Alt + D",
+            "Win + Alt + D",
+            "Ctrl + Shift + V",
+            "F8",
+            "F7",
+        ]
+        toggle_options = [
+            "Ctrl + Shift + P",
+            "Ctrl + Alt + P",
+            "Win + Alt + P",
+            "Ctrl + Shift + Space",
+            "F11",
+        ]
 
-        for ri, (combo, action_name) in enumerate(quick_keys):
-            r = ri // 2
-            col_offset = (ri % 2) * 2
-            tk.Label(q_frame, text=combo, font=("Segoe UI Semibold", 8), bg=c["panel2"], fg=c["signal"],
-                     padx=6, pady=2, relief="flat", bd=0).grid(row=r, column=col_offset, padx=(0, 6), pady=2, sticky="w")
-            ttk.Label(q_frame, text=action_name, font=("Segoe UI", 9)).grid(row=r, column=col_offset+1, padx=(0, 14), pady=2, sticky="w")
+        ttk.Label(hk_grid, text=vp_i18n.t("hotkey_speak_label") + ":", font=("Segoe UI Semibold", 9)).grid(
+            row=0, column=0, sticky="w", padx=(0, 16), pady=4)
+        cb_speak = ttk.Combobox(hk_grid, textvariable=self.var_hotkey_speak, values=speak_options, state="readonly", width=22)
+        cb_speak.grid(row=0, column=1, sticky="w", pady=4)
+        cb_speak.bind("<<ComboboxSelected>>", self._on_hotkey_changed)
 
-        ttk.Button(t_shortcuts, text=vp_i18n.t("open_shortcuts_dialog"), style="Toggle.TButton",
-                   command=self._show_shortcuts_dialog).grid(row=3, column=0, columnspan=2, sticky="w", pady=(8, 0))
+        ttk.Label(hk_grid, text=vp_i18n.t("hotkey_dictate_label") + ":", font=("Segoe UI Semibold", 9)).grid(
+            row=1, column=0, sticky="w", padx=(0, 16), pady=4)
+        cb_dict = ttk.Combobox(hk_grid, textvariable=self.var_hotkey_dictate, values=dictate_options, state="readonly", width=22)
+        cb_dict.grid(row=1, column=1, sticky="w", pady=4)
+        cb_dict.bind("<<ComboboxSelected>>", self._on_hotkey_changed)
+
+        ttk.Label(hk_grid, text=vp_i18n.t("hotkey_toggle_label") + ":", font=("Segoe UI Semibold", 9)).grid(
+            row=2, column=0, sticky="w", padx=(0, 16), pady=4)
+        cb_tog = ttk.Combobox(hk_grid, textvariable=self.var_hotkey_toggle, values=toggle_options, state="readonly", width=22)
+        cb_tog.grid(row=2, column=1, sticky="w", pady=4)
+        cb_tog.bind("<<ComboboxSelected>>", self._on_hotkey_changed)
+
+        # Чекбоксы дополнительных удобств
+        opt_box = ttk.Frame(t_shortcuts)
+        opt_box.grid(row=3, column=0, columnspan=2, sticky="w", pady=(8, 12))
+        ttk.Checkbutton(opt_box, text=vp_i18n.t("hotkey_double_c_label"),
+                        variable=self.var_hotkey_double_c, command=self._on_hotkey_changed).pack(anchor="w", pady=(0, 4))
+        ttk.Checkbutton(opt_box, text=vp_i18n.t("hotkey_media_label"),
+                        variable=self.var_hotkey_media, command=self._on_hotkey_changed).pack(anchor="w")
+
+        # Кнопки сброса и полной справки
+        btn_bar = ttk.Frame(t_shortcuts)
+        btn_bar.grid(row=4, column=0, columnspan=2, sticky="w", pady=(6, 0))
+        ttk.Button(btn_bar, text="↺  " + vp_i18n.t("reset_defaults"), style="Toggle.TButton",
+                   command=self._reset_hotkeys_defaults).pack(side="left", padx=(0, 10))
+        ttk.Button(btn_bar, text="⌨  " + vp_i18n.t("open_shortcuts_dialog"), style="Toggle.TButton",
+                   command=self._show_shortcuts_dialog).pack(side="left")
 
         # — Команда —
         t4 = tab(vp_i18n.t("tab_team"))
@@ -5302,7 +5391,10 @@ class VoicePlayerApp:
                          else "объявление автора выключено", ok=True)
 
     def _on_autoclip(self):
-        if self.var_autoclip.get():
+        val = bool(self.var_autoclip.get())
+        self.prefs["autoclip"] = val
+        self._save_prefs()
+        if val:
             try: self._last_clip = (self.root.clipboard_get() or "").strip()
             except Exception: self._last_clip = ""
             self._set_status("авто-озвучка буфера включена — копируй текст", ok=True)
@@ -7833,10 +7925,16 @@ class VoicePlayerApp:
 
     def _show_ai_setup_dialog(self, tool):
         w = tk.Toplevel(self.root)
-        w.title(f"{tool['label']} · Инструкция")
-        w.geometry("520x260")
-        self._center_over_root(w, 520, 260)
+        w.title(vp_i18n.t("guide_title", tool=tool['label']))
+        is_gui = bool(tool.get("is_gui_app", False))
+        win_w, win_h = (580, 320) if is_gui else (520, 260)
+        w.geometry(f"{win_w}x{win_h}")
+        self._center_over_root(w, win_w, win_h)
         w.transient(self.root)
+        self._apply_window_titlebar_theme(w)
+        w.after(30, lambda: self._apply_window_titlebar_theme(w))
+        w.bind("<Map>", lambda e: self._apply_window_titlebar_theme(w), add="+")
+
         c = getattr(self, "colors", {})
         panel_bg = getattr(self, "col_panel", "#131615")
         panel2_bg = c.get("panel2", "#1c211f")
@@ -7844,38 +7942,70 @@ class VoicePlayerApp:
         f = ttk.Frame(w, padding=20, style="Panel.TFrame")
         f.pack(fill="both", expand=True)
         ttk.Label(f, text=f"{tool.get('icon', '🤖')} {tool['label']}", font=("Segoe UI Semibold", 13)).pack(anchor="w")
-        ttk.Label(f, text=tool.get('desc', ''), style="Dim.TLabel").pack(anchor="w", pady=(4, 12))
-
-        tip = tool.get("setup_tip") or "https://github.com"
-        ttk.Label(f, text="Команда установки или ссылка:", font=("Segoe UI Semibold", 9)).pack(anchor="w")
-
-        entry = tk.Entry(f, bg=panel2_bg, fg=self.col_ink, insertbackground=self.col_ink,
-                         relief="flat", highlightthickness=1, highlightbackground=self.col_hairline)
-        entry.insert(0, tip)
-        entry.configure(state="readonly")
-        entry.pack(fill="x", pady=(4, 16), ipady=4)
+        ttk.Label(f, text=tool.get('desc', ''), style="Dim.TLabel").pack(anchor="w", pady=(2, 10))
 
         btn_bar = ttk.Frame(f, style="Panel.TFrame")
-        btn_bar.pack(fill="x")
 
-        def copy_cmd():
-            self.root.clipboard_clear()
-            self.root.clipboard_append(tip)
-            self._set_status(f"Скопировано: {tip}", ok=True)
-            w.destroy()
-
-        def open_url():
-            import webbrowser
-            if tip.startswith("http"):
-                webbrowser.open(tip)
+        if is_gui:
+            tid = tool.get("id")
+            spk = self.var_hotkey_speak.get() if hasattr(self, "var_hotkey_speak") else "Ctrl+Shift+S"
+            if tid == "kimi":
+                guide_txt = vp_i18n.t("kimi_app_guide_desc", speak_key=spk)
+            elif tid == "deepseek":
+                guide_txt = vp_i18n.t("deepseek_app_guide_desc", speak_key=spk)
+            elif tid == "comet":
+                guide_txt = vp_i18n.t("comet_app_guide_desc", speak_key=spk)
+            elif tid == "ollama":
+                guide_txt = vp_i18n.t("ollama_app_guide_desc", speak_key=spk)
             else:
-                copy_cmd()
-            w.destroy()
+                guide_txt = vp_i18n.t("comet_app_guide_desc", speak_key=spk)
 
-        ttk.Button(btn_bar, text="Скопировать команду", style="Primary.TButton", command=copy_cmd).pack(side="left", padx=(0, 8))
-        if tip.startswith("http"):
-            ttk.Button(btn_bar, text="Открыть сайт", command=open_url).pack(side="left")
-        ttk.Button(btn_bar, text="Закрыть", command=w.destroy).pack(side="right")
+            ttk.Label(f, text=guide_txt, wraplength=530, justify="left").pack(anchor="w", pady=(0, 16))
+
+            btn_bar.pack(fill="x", side="bottom")
+
+            def toggle_clip_state():
+                self.var_autoclip.set(not self.var_autoclip.get())
+                self._on_autoclip()
+                is_on = self.var_autoclip.get()
+                btn_clip.configure(text=vp_i18n.t("btn_autoclip_active") if is_on else vp_i18n.t("btn_enable_autoclip"))
+
+            btn_clip = ttk.Button(btn_bar,
+                                  text=vp_i18n.t("btn_autoclip_active") if self.var_autoclip.get() else vp_i18n.t("btn_enable_autoclip"),
+                                  style="Primary.TButton",
+                                  command=toggle_clip_state)
+            btn_clip.pack(side="left")
+            ttk.Button(btn_bar, text=vp_i18n.t("close"), command=w.destroy).pack(side="right")
+        else:
+            tip = tool.get("setup_tip") or "https://github.com"
+            ttk.Label(f, text="Команда установки или ссылка:", font=("Segoe UI Semibold", 9)).pack(anchor="w")
+
+            entry = tk.Entry(f, bg=panel2_bg, fg=self.col_ink, insertbackground=self.col_ink,
+                             relief="flat", highlightthickness=1, highlightbackground=self.col_hairline)
+            entry.insert(0, tip)
+            entry.configure(state="readonly")
+            entry.pack(fill="x", pady=(4, 16), ipady=4)
+
+            btn_bar.pack(fill="x")
+
+            def copy_cmd():
+                self.root.clipboard_clear()
+                self.root.clipboard_append(tip)
+                self._set_status(f"Скопировано: {tip}", ok=True)
+                w.destroy()
+
+            def open_url():
+                import webbrowser
+                if tip.startswith("http"):
+                    webbrowser.open(tip)
+                else:
+                    copy_cmd()
+                w.destroy()
+
+            ttk.Button(btn_bar, text="Скопировать команду", style="Primary.TButton", command=copy_cmd).pack(side="left", padx=(0, 8))
+            if tip.startswith("http"):
+                ttk.Button(btn_bar, text="Открыть сайт", command=open_url).pack(side="left")
+            ttk.Button(btn_bar, text=vp_i18n.t("close"), command=w.destroy).pack(side="right")
 
     def _build_ai_tab(self, tab):
         for w in tab.winfo_children():
@@ -7901,20 +8031,26 @@ class VoicePlayerApp:
                    command=lambda: self._pull_recent_ai(limit_per_source=8, silent=False)).pack(side="right")
 
         ttk.Label(top_box, text=vp_i18n.t("ai_connect_desc"),
-                  style="Dim.TLabel", justify="left").pack(anchor="w", pady=(2, 6))
+                  style="Dim.TLabel", justify="left").pack(anchor="w", pady=(2, 4))
+
+        ttk.Checkbutton(top_box,
+                        text="📋 " + vp_i18n.t("opt_autoclip") + " (" + vp_i18n.t("autoclip_ai_hint") + ")",
+                        variable=self.var_autoclip,
+                        command=self._on_autoclip).pack(anchor="w", pady=(0, 6))
 
         # Панель категорий (быстрые фильтры)
         cat_bar = ttk.Frame(top_box, style="Panel.TFrame")
         cat_bar.pack(fill="x", pady=(0, 6))
 
+        total_cnt = len(vp_integrations.detect()) if hasattr(vp_integrations, "detect") else 23
         cats = [
-            ("all", "Все (23)"),
-            ("agents", "Агенты"),
-            ("ide", "IDE"),
-            ("cli", "CLI"),
-            ("local_llm", "Локальные LLM"),
-            ("chat", "Чат и Поиск"),
-            ("terminal", "Терминал"),
+            ("all", vp_i18n.t("cat_all_count", n=total_cnt)),
+            ("agents", vp_i18n.t("cat_agents")),
+            ("ide", vp_i18n.t("cat_ide")),
+            ("cli", vp_i18n.t("cat_cli")),
+            ("local_llm", vp_i18n.t("cat_local_llm")),
+            ("chat", vp_i18n.t("cat_chat_search")),
+            ("terminal", vp_i18n.t("cat_terminal")),
         ]
 
         def set_filter(cat_id):
@@ -8017,9 +8153,12 @@ class VoicePlayerApp:
             if not tool["installed"]:
                 state_text = "⬛ " + vp_i18n.t("not_found")
                 state_fg = self.col_mute
+            elif tool.get("is_gui_app"):
+                state_text = "🟢 " + vp_i18n.t("gui_app_ready_status")
+                state_fg = signal_col
             elif tool["connected"]:
                 if tid == "terminal":
-                    state_text = "🟢 Пайп и vp-say активны"
+                    state_text = vp_i18n.t("terminal_active_status")
                 elif tid in ("antigravity", "codex", "cline"):
                     state_text = "🟢 " + vp_i18n.t("reads_dialogs_hooks")
                 else:
@@ -8031,13 +8170,16 @@ class VoicePlayerApp:
 
             tk.Label(right, text=state_text, font=("Segoe UI", 9), bg=panel2_bg, fg=state_fg).pack(side="left", padx=(0, 12))
 
-            if tool["installed"]:
+            if tool.get("is_gui_app"):
+                ttk.Button(right, text=vp_i18n.t("guide_btn"),
+                           command=lambda t=tool: self._show_ai_setup_dialog(t)).pack(side="left")
+            elif tool["installed"]:
                 btn_txt = vp_i18n.t("disconnect") if tool["connected"] else vp_i18n.t("connect")
                 btn_style = "Toggle.TButton" if tool["connected"] else "Primary.TButton"
                 ttk.Button(right, text=btn_txt, style=btn_style,
                            command=lambda t=tool: toggle(t)).pack(side="left")
             else:
-                ttk.Button(right, text="Инструкция",
+                ttk.Button(right, text=vp_i18n.t("guide_btn"),
                            command=lambda t=tool: self._show_ai_setup_dialog(t)).pack(side="left")
 
         # Нижняя подсказка
@@ -8410,6 +8552,79 @@ class VoicePlayerApp:
                              "при озвучке покажу её справа", ok=True)
 
     # ------------------ глобальная горячая клавиша «озвучить выделенное» ------------------
+
+    def _parse_hotkey_str(self, combo_str: str) -> tuple[int, int]:
+        """Преобразовать строку комбинации в (modifiers, vk_code) для Windows RegisterHotKey."""
+        raw = combo_str.split("(")[0].strip()
+        parts = [p.strip().upper() for p in raw.split("+")]
+        mod = 0x4000  # MOD_NOREPEAT
+        vk = 0
+        for p in parts:
+            if p in ("CTRL", "CONTROL"): mod |= 0x0002
+            elif p == "SHIFT": mod |= 0x0004
+            elif p == "ALT": mod |= 0x0001
+            elif p in ("WIN", "WINDOWS", "SUPER"): mod |= 0x0008
+            elif p.startswith("F") and p[1:].isdigit():
+                num = int(p[1:])
+                if 1 <= num <= 24:
+                    vk = 0x6F + num
+            elif p == "SPACE":
+                vk = 0x20
+            elif len(p) == 1:
+                vk = ord(p)
+        return mod, vk
+
+    def _on_hotkey_changed(self, *args):
+        """Вызывается при изменении любой горячей клавиши в настройках."""
+        self._save_prefs()
+        self._reload_global_hotkeys()
+        self._set_status(vp_i18n.t("hotkeys_updated"), ok=True)
+
+    def _reset_hotkeys_defaults(self):
+        """Сбросить горячие клавиши к рекомендуемым заводским значениям."""
+        if hasattr(self, "var_hotkey_speak"):
+            self.var_hotkey_speak.set("Ctrl + Shift + S")
+        if hasattr(self, "var_hotkey_dictate"):
+            self.var_hotkey_dictate.set("Ctrl + Shift + D")
+        if hasattr(self, "var_hotkey_toggle"):
+            self.var_hotkey_toggle.set("Ctrl + Shift + P")
+        if hasattr(self, "var_hotkey_double_c"):
+            self.var_hotkey_double_c.set(True)
+        if hasattr(self, "var_hotkey_media"):
+            self.var_hotkey_media.set(True)
+        self._on_hotkey_changed()
+
+    def _reload_global_hotkeys(self):
+        """Динамически перерегистрировать горячие клавиши Windows при смене настроек."""
+        if os.name != "nt":
+            return
+        try:
+            import ctypes
+            user32 = ctypes.windll.user32
+            # Разрегистрируем предыдущие
+            for hid in (1, 2, 3, 4, 5, 6, 7, 8, 9):
+                try: user32.UnregisterHotKey(None, hid)
+                except Exception: pass
+
+            spk = self.var_hotkey_speak.get() if hasattr(self, "var_hotkey_speak") else "Ctrl + Shift + S"
+            dic = self.var_hotkey_dictate.get() if hasattr(self, "var_hotkey_dictate") else "Ctrl + Shift + D"
+            tog = self.var_hotkey_toggle.get() if hasattr(self, "var_hotkey_toggle") else "Ctrl + Shift + P"
+
+            m1, v1 = self._parse_hotkey_str(spk)
+            m2, v2 = self._parse_hotkey_str(dic)
+            m3, v3 = self._parse_hotkey_str(tog)
+
+            if v1: user32.RegisterHotKey(None, 1, m1, v1)
+            if v2: user32.RegisterHotKey(None, 2, m2, v2)
+            if v3: user32.RegisterHotKey(None, 3, m3, v3)
+
+            # Также всегда регистрируем Ctrl+Shift+S / Ctrl+Shift+D как резервные
+            user32.RegisterHotKey(None, 4, 0x4000 | 0x0002 | 0x0004, 0x53) # Ctrl+Shift+S
+            user32.RegisterHotKey(None, 5, 0x4000 | 0x0002 | 0x0004, 0x44) # Ctrl+Shift+D
+            log_line(f"Global hotkeys reloaded: speak={spk}, dictate={dic}, toggle={tog}")
+        except Exception as e:
+            log_line(f"Error reloading hotkeys: {e}")
+
     def _start_global_hotkey(self):
         if os.name != "nt":
             return
@@ -8424,21 +8639,24 @@ class VoicePlayerApp:
             VK_S, VK_P, VK_D = 0x53, 0x50, 0x44
 
             # Регистрируем глобальные комбинации (основные + альтернативные):
-            # 1. Ctrl+Alt+S (основная — озвучить выделение)
-            # 2. Ctrl+Alt+P (показать / скрыть окно VoicePlayer)
-            # 3. Win+Alt+S  (быстрая и бесконфликтная на Windows 10/11)
-            # 4. Ctrl+Shift+S (удобная альтернатива без Alt)
-            # 5. Win+Alt+P  (показать / скрыть окно)
-            # 6. Ctrl+Alt+D (глобальная диктовка голосом из любого окна)
-            # 7. Win+Alt+D  (глобальная диктовка альтернативная)
+            # 1. Ctrl+Shift+S (основная надёжная — озвучить выделение)
+            # 2. Ctrl+Shift+D (основная надёжная — голосовая диктовка)
+            # 3. Ctrl+Shift+P (основная надёжная — скрыть/показать)
+            # 4. Ctrl+Alt+S   (классическая озвучка)
+            # 5. Win+Alt+S    (альтернативная озвучка)
+            # 6. Ctrl+Alt+D   (классическая диктовка)
+            # 7. Win+Alt+D    (альтернативная диктовка)
+            # 8. Ctrl+Alt+P / Win+Alt+P (альтернативный показ/скрытие)
             hotkeys = [
-                (1, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, VK_S, "Ctrl+Alt+S (озвучить выделение)"),
-                (2, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, VK_P, "Ctrl+Alt+P (показать/скрыть)"),
-                (3, MOD_WIN | MOD_ALT | MOD_NOREPEAT, VK_S, "Win+Alt+S (озвучить выделение)"),
-                (4, MOD_CONTROL | MOD_SHIFT | MOD_NOREPEAT, VK_S, "Ctrl+Shift+S (озвучить выделение)"),
-                (5, MOD_WIN | MOD_ALT | MOD_NOREPEAT, VK_P, "Win+Alt+P (показать/скрыть)"),
-                (6, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, VK_D, "Ctrl+Alt+D (голосовая диктовка)"),
-                (7, MOD_WIN | MOD_ALT | MOD_NOREPEAT, VK_D, "Win+Alt+D (голосовая диктовка)"),
+                (1, MOD_CONTROL | MOD_SHIFT | MOD_NOREPEAT, VK_S, "Ctrl+Shift+S (озвучить выделение)"),
+                (2, MOD_CONTROL | MOD_SHIFT | MOD_NOREPEAT, VK_D, "Ctrl+Shift+D (голосовая диктовка)"),
+                (3, MOD_CONTROL | MOD_SHIFT | MOD_NOREPEAT, VK_P, "Ctrl+Shift+P (показать/скрыть)"),
+                (4, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT,   VK_S, "Ctrl+Alt+S (озвучить выделение)"),
+                (5, MOD_WIN | MOD_ALT | MOD_NOREPEAT,       VK_S, "Win+Alt+S (озвучить выделение)"),
+                (6, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT,   VK_D, "Ctrl+Alt+D (голосовая диктовка)"),
+                (7, MOD_WIN | MOD_ALT | MOD_NOREPEAT,       VK_D, "Win+Alt+D (голосовая диктовка)"),
+                (8, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT,   VK_P, "Ctrl+Alt+P (показать/скрыть)"),
+                (9, MOD_WIN | MOD_ALT | MOD_NOREPEAT,       VK_P, "Win+Alt+P (показать/скрыть)"),
             ]
             registered_any_speak = False
             for hid, mod, vk, desc in hotkeys:
@@ -8469,12 +8687,12 @@ class VoicePlayerApp:
                     break
                 if msg.message == 0x0312:   # WM_HOTKEY
                     hid = int(msg.wParam)
-                    if hid in (1, 3, 4):    # Озвучить выделенный текст
+                    if hid in (1, 4, 5):    # Озвучить выделенный текст (Ctrl+Shift+S / Ctrl+Alt+S / Win+Alt+S)
                         threading.Thread(target=self._speak_selection_worker, daemon=True, name="speak-sel").start()
-                    elif hid in (2, 5):     # Показать / скрыть плеер
-                        self.root.after(0, self._toggle_window)
-                    elif hid in (6, 7):     # Глобальная диктовка
+                    elif hid in (2, 6, 7):  # Глобальная диктовка (Ctrl+Shift+D / Ctrl+Alt+D / Win+Alt+D)
                         self.root.after(0, self._toggle_dictate)
+                    elif hid in (3, 8, 9):  # Показать / скрыть окно (Ctrl+Shift+P / Ctrl+Alt+P / Win+Alt+P)
+                        self.root.after(0, self._toggle_window)
         except Exception as e:
             log_line(f"hotkey loop error: {e}")
 
@@ -8529,6 +8747,18 @@ class VoicePlayerApp:
                                     self.root.after(80, lambda: self._speak_clipboard(copied_hint=True))
                                 else:
                                     self._last_ctrl_c_ts = now
+                        elif vk == 0x44:   # Клавиша 'D' (Ctrl+Shift+D -> диктовка)
+                            ctrl_down  = (user32.GetAsyncKeyState(0x11) & 0x8000) != 0
+                            shift_down = (user32.GetAsyncKeyState(0x10) & 0x8000) != 0
+                            alt_down   = (user32.GetAsyncKeyState(0x12) & 0x8000) != 0
+                            if ctrl_down and shift_down and not alt_down:
+                                self.root.after(0, self._toggle_dictate)
+                        elif vk == 0x53:   # Клавиша 'S' (Ctrl+Shift+S -> озвучить выделение)
+                            ctrl_down  = (user32.GetAsyncKeyState(0x11) & 0x8000) != 0
+                            shift_down = (user32.GetAsyncKeyState(0x10) & 0x8000) != 0
+                            alt_down   = (user32.GetAsyncKeyState(0x12) & 0x8000) != 0
+                            if ctrl_down and shift_down and not alt_down:
+                                threading.Thread(target=self._speak_selection_worker, daemon=True, name="speak-sel").start()
                 except Exception:
                     pass
                 return user32.CallNextHookEx(None, nCode, wParam, lParam)
@@ -8557,6 +8787,12 @@ class VoicePlayerApp:
         except Exception:
             win.geometry(f"{w}x{h}")
         self._apply_window_titlebar_theme(win)
+        try:
+            win.after(25, lambda w=win: self._apply_window_titlebar_theme(w))
+            win.after(120, lambda w=win: self._apply_window_titlebar_theme(w))
+            win.bind("<Map>", lambda e, w=win: self._apply_window_titlebar_theme(w), add="+")
+        except Exception:
+            pass
 
     def _open_list_menu(self):
         """Открыть выпадающее меню «⋮» с действиями над списком под кнопкой."""
@@ -8593,11 +8829,14 @@ class VoicePlayerApp:
 
             # 1. Ждём, пока пользователь отпустит физические клавиши Alt, Win, S (до 350мс)
             t0 = time.time()
+            had_alt = False
             while time.time() - t0 < 0.35:
                 alt_down = (user32.GetAsyncKeyState(0x12) & 0x8000) != 0
                 win_down = ((user32.GetAsyncKeyState(0x5B) & 0x8000) != 0 or
                             (user32.GetAsyncKeyState(0x5C) & 0x8000) != 0)
                 s_down   = (user32.GetAsyncKeyState(0x53) & 0x8000) != 0
+                if alt_down:
+                    had_alt = True
                 if not alt_down and not win_down and not s_down:
                     break
                 time.sleep(0.02)
@@ -8612,6 +8851,14 @@ class VoicePlayerApp:
             user32.keybd_event(0x53, 0x1F, KEYEVENTF_KEYUP, 0) # S
             user32.keybd_event(0x5B, 0, KEYEVENTF_KEYUP, 0)    # LWin
             user32.keybd_event(0x5C, 0, KEYEVENTF_KEYUP, 0)    # RWin
+
+            # Если нажимался Alt, сбрасываем режим меню окна Windows клавишей Escape (0x1B)
+            if had_alt:
+                time.sleep(0.02)
+                user32.keybd_event(0x1B, 0x01, 0, 0)               # Escape down
+                time.sleep(0.01)
+                user32.keybd_event(0x1B, 0x01, KEYEVENTF_KEYUP, 0) # Escape up
+
             time.sleep(0.03)
 
             # 3. Отправляем Ctrl+C со сканкодами
@@ -8777,11 +9024,10 @@ class VoicePlayerApp:
 
         # Список горячих клавиш: (Категория, Комбинация, Действие)
         shortcuts = [
-            (cat_global, "Ctrl + Alt + S  /  Win + Alt + S", d("global_speak")),
-            (cat_global, "Ctrl + Shift + S", d("global_speak")),
-            (cat_global, "Дважды Ctrl + C", d("double_c_speak")),
-            (cat_global, "Ctrl + Alt + D  /  Win + Alt + D", d("global_dictate")),
-            (cat_global, "Ctrl + Alt + P  /  Win + Alt + P", d("global_toggle")),
+            (cat_global, "Ctrl + Shift + S  (или Ctrl+Alt+S / Win+Alt+S)", d("global_speak")),
+            (cat_global, "Дважды Ctrl + C  (быстрая озвучка)", d("double_c_speak")),
+            (cat_global, "Ctrl + Shift + D  (или Ctrl+Alt+D)", d("global_dictate")),
+            (cat_global, "Ctrl + Shift + P  (или Ctrl+Alt+P)", d("global_toggle")),
             (cat_play, "Space  /  K", d("space")),
             (cat_play, "Ctrl + Enter", d("ctrl_enter")),
             (cat_play, "→  /  ←", d("arrows_lr")),
