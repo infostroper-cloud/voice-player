@@ -21,6 +21,7 @@ import glob
 import hashlib
 import json
 import os
+import re
 import sqlite3
 import time
 from pathlib import Path
@@ -860,6 +861,56 @@ class DeepSeekWatcher:
         files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
         return files[:8]
 
+    def _read_full_turns_from_zstd(self, sess_id: str) -> dict:
+        """Считывает полные (необрезанные) тексты ходов из session.v4.jsonl.zstd."""
+        out = {}
+        try:
+            import zstandard as zstd
+        except ImportError:
+            return out
+
+        zstd_candidates = list(self.dsh_dir.glob(f"sessions/*/session-{sess_id}/session.v4.jsonl.zstd"))
+        if not zstd_candidates:
+            return out
+        zpath = zstd_candidates[0]
+        try:
+            dctx = zstd.ZstdDecompressor()
+            with open(zpath, "rb") as fh:
+                with dctx.stream_reader(fh) as reader:
+                    lines = reader.read().decode("utf-8", errors="ignore").splitlines()
+            last_prompt = ""
+            for line in lines:
+                try:
+                    ev = json.loads(line)
+                    t = ev.get("type", "")
+                    data = ev.get("data", {})
+                    if t == "user/message":
+                        content = data.get("content", [])
+                        txt = "".join(c.get("text", "") for c in content if isinstance(c, dict) and c.get("type") == "text").strip()
+                        txt = re.sub(r"^Time sampled while preparing turn[^\n]*\n+", "", txt).strip()
+                        txt = re.sub(r"^Browser time zone for this request[^\n]*\n+", "", txt).strip()
+                        if txt and not txt.startswith("Elapsed since the preceding"):
+                            last_prompt = txt
+                    elif t == "assistant/message":
+                        msg = data.get("message", {})
+                        content = msg.get("content", [])
+                        text_parts = [c.get("text", "") for c in content if isinstance(c, dict) and c.get("type") == "text"]
+                        full_text = "\n\n".join(tp.strip() for tp in text_parts if tp.strip())
+                        turn_idx = data.get("turn")
+                        seq = ev.get("seq", 0)
+                        if full_text and turn_idx is not None:
+                            out[turn_idx] = {
+                                "text": full_text,
+                                "prompt": last_prompt,
+                                "seq": seq,
+                                "time": ev.get("time"),
+                            }
+                except Exception:
+                    continue
+        except Exception:
+            pass
+        return out
+
     def poll(self, now: Optional[float] = None) -> list:
         now = time.time() if now is None else now
         if not self.available():
@@ -877,6 +928,7 @@ class DeepSeekWatcher:
                 turns = rows.get("turnOutline", {}).get("val", {}).get("turns", [])
                 title = rows.get("title", {}).get("val", "") or rows.get("goal", {}).get("val", {}).get("current", {}).get("goal", {}).get("objective", "")
                 sess_id = fpath.stem.replace("session-", "")
+                full_turns = self._read_full_turns_from_zstd(sess_id)
 
                 for t in turns:
                     turn_num = t.get("turn") or t.get("turnId") or t.get("id") or 0
@@ -889,6 +941,12 @@ class DeepSeekWatcher:
                         continue
                     prompt = (t.get("prompt") or "").strip()
                     resp = (t.get("response") or "").strip()
+                    if turn_num in full_turns:
+                        full_resp = full_turns[turn_num].get("text", "").strip()
+                        if full_resp:
+                            resp = full_resp
+                        if not prompt:
+                            prompt = full_turns[turn_num].get("prompt", "").strip()
                     if not resp:
                         continue
                     mtime = fpath.stat().st_mtime
@@ -923,9 +981,18 @@ class DeepSeekWatcher:
                 title = rows.get("title", {}).get("val", "") or rows.get("goal", {}).get("val", {}).get("current", {}).get("goal", {}).get("objective", "")
                 sess_id = fpath.stem.replace("session-", "")
                 mtime = fpath.stat().st_mtime
+                full_turns = self._read_full_turns_from_zstd(sess_id)
+
                 for t in reversed(turns):
                     resp = (t.get("response") or "").strip()
                     prompt = (t.get("prompt") or "").strip()
+                    turn_num = t.get("turn") or t.get("turnId") or t.get("id") or 0
+                    if turn_num in full_turns:
+                        full_resp = full_turns[turn_num].get("text", "").strip()
+                        if full_resp:
+                            resp = full_resp
+                        if not prompt:
+                            prompt = full_turns[turn_num].get("prompt", "").strip()
                     if resp:
                         out.append({
                             "source": "deepseek",
@@ -936,7 +1003,7 @@ class DeepSeekWatcher:
                             "time": time.strftime("%H:%M", time.localtime(mtime)),
                             "date": time.strftime("%d.%m.%Y", time.localtime(mtime)),
                             "text": resp,
-                            "key": f"dsh:{sess_id}:{t.get('turn', 0)}:{t.get('seq', 0)}",
+                            "key": f"dsh:{sess_id}:{turn_num}:{t.get('seq', 0)}",
                         })
                         if len(out) >= limit:
                             return out
@@ -973,12 +1040,29 @@ class KimiWatcher:
         wires.sort(key=lambda p: p.stat().st_mtime, reverse=True)
         return wires[:8]
 
+    def _extract_message_text(self, msg: dict) -> tuple[str, str]:
+        """Возвращает (role, text) из структуры сообщения Kimi."""
+        if not isinstance(msg, dict):
+            return "", ""
+        if "message" in msg and isinstance(msg["message"], dict):
+            msg = msg["message"]
+        role = (msg.get("role") or "").lower()
+        content = msg.get("content", [])
+        if isinstance(content, str):
+            return role, content.strip()
+        if isinstance(content, list):
+            txt = "".join(c.get("text", "") for c in content if isinstance(c, dict)).strip()
+            return role, txt
+        return role, ""
+
     def poll(self, now: Optional[float] = None) -> list:
         now = time.time() if now is None else now
         if not self.available():
             return []
 
         files_state = self.state.setdefault("files", {})
+        prompts_state = self.state.setdefault("prompts", {})
+        streaming_state = self.state.setdefault("streaming", {})
         first_run = not self.state.get("init")
         out = []
 
@@ -1006,26 +1090,78 @@ class KimiWatcher:
                 lines = chunk.splitlines()
                 conv_name = wpath.parent.parent.name
                 mtime = wpath.stat().st_mtime
+                current_prompt = prompts_state.get(conv_name, "")
+                accum_stream = streaming_state.setdefault(conv_name, "")
+
                 for line in lines:
                     try:
                         ev = json.loads(line)
-                        if ev.get("type") == "context.append_message":
-                            msg = ev.get("message", {})
-                            if msg.get("role") == "assistant":
-                                content = msg.get("content", [])
-                                txt = "".join(c.get("text", "") for c in content if isinstance(c, dict)).strip()
-                                if txt:
-                                    out.append({
-                                        "source": "kimi",
-                                        "author": "Kimi Desktop",
-                                        "session": conv_name,
-                                        "title": "Kimi",
-                                        "prompt": "",
-                                        "time": time.strftime("%H:%M", time.localtime(mtime)),
-                                        "date": time.strftime("%d.%m.%Y", time.localtime(mtime)),
-                                        "text": txt,
-                                        "key": f"kimi:{conv_name}:{hash(txt)}",
-                                    })
+                        etype = ev.get("type", "")
+
+                        # 1. Захват промпта пользователя
+                        if etype == "turn.prompt":
+                            inputs = ev.get("input", [])
+                            if isinstance(inputs, list):
+                                p_txt = "".join(c.get("text", "") for c in inputs if isinstance(c, dict)).strip()
+                                p_txt = re.sub(r"^<meta[^\n>]*>\n*", "", p_txt).strip()
+                                if p_txt and not p_txt.startswith("<system-reminder>"):
+                                    current_prompt = p_txt
+                                    prompts_state[conv_name] = current_prompt
+
+                        # 2. Сообщения через append_message или agent.message.appended
+                        if etype in ("context.append_message", "agent.message.appended"):
+                            role, txt = self._extract_message_text(ev.get("message", {}))
+                            if role == "user" and txt:
+                                clean_p = re.sub(r"^<meta[^\n>]*>\n*", "", txt).strip()
+                                if not clean_p.startswith("<system-reminder>"):
+                                    current_prompt = clean_p
+                                    prompts_state[conv_name] = current_prompt
+                            elif role == "assistant" and txt:
+                                out.append({
+                                    "source": "kimi",
+                                    "author": "Kimi Desktop",
+                                    "session": conv_name,
+                                    "title": _short(current_prompt or "Kimi"),
+                                    "prompt": current_prompt[:300],
+                                    "time": time.strftime("%H:%M", time.localtime(mtime)),
+                                    "date": time.strftime("%d.%m.%Y", time.localtime(mtime)),
+                                    "text": txt,
+                                    "key": f"kimi:{conv_name}:{hash(txt)}",
+                                })
+                                streaming_state[conv_name] = ""
+
+                        # 3. Накопление потоковых дельт из context.append_loop_event
+                        elif etype == "context.append_loop_event":
+                            loop_ev = ev.get("event", {})
+                            if loop_ev.get("type") == "content.part":
+                                part = loop_ev.get("part", {})
+                                p_txt = part.get("text", "") if isinstance(part, dict) else ""
+                                if p_txt:
+                                    accum_stream += p_txt
+                                    streaming_state[conv_name] = accum_stream
+
+                        # 4. Завершение хода: если сообщение стримилось, отдаём накопившийся текст
+                        elif etype in ("turn.ended", "agent.turn.ended", "prompt.completed"):
+                            reason = ev.get("reason") or ev.get("outcome")
+                            if reason in ("completed", "success", "done") and accum_stream.strip():
+                                final_txt = accum_stream.strip()
+                                out.append({
+                                    "source": "kimi",
+                                    "author": "Kimi Desktop",
+                                    "session": conv_name,
+                                    "title": _short(current_prompt or "Kimi"),
+                                    "prompt": current_prompt[:300],
+                                    "time": time.strftime("%H:%M", time.localtime(mtime)),
+                                    "date": time.strftime("%d.%m.%Y", time.localtime(mtime)),
+                                    "text": final_txt,
+                                    "key": f"kimi:{conv_name}:{hash(final_txt)}",
+                                })
+                                accum_stream = ""
+                                streaming_state[conv_name] = ""
+                            elif reason == "failed":
+                                accum_stream = ""
+                                streaming_state[conv_name] = ""
+
                     except Exception:
                         pass
             except Exception:
@@ -1043,30 +1179,41 @@ class KimiWatcher:
             mtime = wpath.stat().st_mtime
             try:
                 with open(wpath, "r", encoding="utf-8", errors="ignore") as f:
-                    for line in reversed(f.readlines()):
-                        try:
-                            ev = json.loads(line)
-                            if ev.get("type") == "context.append_message":
-                                msg = ev.get("message", {})
-                                if msg.get("role") == "assistant":
-                                    content = msg.get("content", [])
-                                    txt = "".join(c.get("text", "") for c in content if isinstance(c, dict)).strip()
-                                    if txt:
-                                        out.append({
-                                            "source": "kimi",
-                                            "author": "Kimi Desktop",
-                                            "session": conv_name,
-                                            "title": "Kimi",
-                                            "prompt": "",
-                                            "time": time.strftime("%H:%M", time.localtime(mtime)),
-                                            "date": time.strftime("%d.%m.%Y", time.localtime(mtime)),
-                                            "text": txt,
-                                            "key": f"kimi:{conv_name}:{hash(txt)}",
-                                        })
-                                        if len(out) >= limit:
-                                            return out
-                        except Exception:
-                            pass
+                    lines = f.readlines()
+                last_prompt = ""
+                for line in lines:
+                    try:
+                        ev = json.loads(line)
+                        etype = ev.get("type", "")
+                        if etype == "turn.prompt":
+                            inputs = ev.get("input", [])
+                            if isinstance(inputs, list):
+                                p_txt = "".join(c.get("text", "") for c in inputs if isinstance(c, dict)).strip()
+                                p_txt = re.sub(r"^<meta[^\n>]*>\n*", "", p_txt).strip()
+                                if p_txt and not p_txt.startswith("<system-reminder>"):
+                                    last_prompt = p_txt
+                        elif etype in ("context.append_message", "agent.message.appended"):
+                            role, txt = self._extract_message_text(ev.get("message", {}))
+                            if role == "user" and txt:
+                                clean_p = re.sub(r"^<meta[^\n>]*>\n*", "", txt).strip()
+                                if not clean_p.startswith("<system-reminder>"):
+                                    last_prompt = clean_p
+                            elif role == "assistant" and txt:
+                                out.append({
+                                    "source": "kimi",
+                                    "author": "Kimi Desktop",
+                                    "session": conv_name,
+                                    "title": _short(last_prompt or "Kimi"),
+                                    "prompt": last_prompt[:300],
+                                    "time": time.strftime("%H:%M", time.localtime(mtime)),
+                                    "date": time.strftime("%d.%m.%Y", time.localtime(mtime)),
+                                    "text": txt,
+                                    "key": f"kimi:{conv_name}:{hash(txt)}",
+                                })
+                                if len(out) >= limit:
+                                    return out
+                    except Exception:
+                        pass
             except Exception:
                 pass
         return out

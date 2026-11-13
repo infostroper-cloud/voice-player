@@ -12,6 +12,8 @@ pillow>=10.0
 pystray>=0.19
 # перетаскивание файлов в окно — только Windows (на macOS/Linux ставить не нужно)
 windnd>=1.0.7; sys_platform == "win32"
+# сжатие сессий DeepSeek Harness
+zstandard>=0.20.0
 # чтение документов вслух (PDF/DOCX/TXT/RTF). DOCX/TXT/RTF работают без зависимостей,
 # для PDF нужен один из: PyMuPDF (быстрее) или pypdf (легче)
 PyMuPDF>=1.23
