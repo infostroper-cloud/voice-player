@@ -86,8 +86,8 @@ if sys.platform == "darwin":
         info_plist={
             "CFBundleName": "VoicePlayer",
             "CFBundleDisplayName": "VoicePlayer",
-            "CFBundleVersion": "1.2.4",
-            "CFBundleShortVersionString": "1.2.4",
+            "CFBundleVersion": "1.2.5",
+            "CFBundleShortVersionString": "1.2.5",
             "NSHighResolutionCapable": "True",
             "LSMinimumSystemVersion": "11.0",
         },

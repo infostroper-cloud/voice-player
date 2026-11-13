@@ -1,8 +1,8 @@
-$ErrorActionPreference = 'Stop'
+﻿$ErrorActionPreference = 'Stop'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 $ErrorActionPreference = "Stop"
 
-$Version = "1.2.4"
+$Version = "1.2.5"
 $Repo = "infostroper-cloud/voice-player"
 $InstallDir = Join-Path $env:LOCALAPPDATA "Programs\VoicePlayer"
 $ZipUrl = "https://github.com/$Repo/releases/download/voice-player-v$Version/voice-player-$Version.zip"

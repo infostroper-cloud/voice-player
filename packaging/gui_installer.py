@@ -27,7 +27,7 @@ from tkinter import ttk, filedialog, messagebox
 NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 PY_INSTALLER_URL = "https://www.python.org/ftp/python/3.12.8/python-3.12.8-amd64.exe"
 
-APP_VERSION_DEFAULT = "1.2.4"
+APP_VERSION_DEFAULT = "1.2.5"
 
 LICENSE_TEXT = """ЛИЦЕНЗИОННОЕ СОГЛАШЕНИЕ С КОНЕЧНЫМ ПОЛЬЗОВАТЕЛЕМ (EULA)
 для программного обеспечения «VoicePlayer» (версия 1.2.x и последующие)
@@ -744,22 +744,19 @@ class ClassicInstallerWizard:
     def _finish_and_launch(self):
         if self.var_launch_now.get():
             dest = Path(self.var_dest.get().strip())
-            launch_cmd = dest / "launch.cmd"
             launch_pyw = dest / "launch.pyw"
+            launch_cmd = dest / "launch.cmd"
             try:
-                if launch_cmd.is_file():
+                py = _find_system_python() or sys.executable
+                pyw = str(Path(py).with_name("pythonw.exe")) if Path(py).with_name("pythonw.exe").is_file() else py
+                if launch_pyw.is_file():
+                    subprocess.Popen([pyw, str(launch_pyw)], cwd=str(dest),
+                                     creationflags=0x00000008 | 0x00000200)
+                elif launch_cmd.is_file():
                     try:
                         os.startfile(str(launch_cmd))
                     except Exception:
                         subprocess.Popen(["cmd.exe", "/c", str(launch_cmd)], cwd=str(dest),
-                                         creationflags=0x00000008 | 0x00000200)
-                elif launch_pyw.is_file():
-                    py = _find_system_python() or sys.executable
-                    pyw = str(Path(py).with_name("pythonw.exe")) if Path(py).with_name("pythonw.exe").is_file() else py
-                    try:
-                        os.startfile(str(launch_pyw))
-                    except Exception:
-                        subprocess.Popen([pyw, str(launch_pyw)], cwd=str(dest),
                                          creationflags=0x00000008 | 0x00000200)
             except Exception:
                 pass

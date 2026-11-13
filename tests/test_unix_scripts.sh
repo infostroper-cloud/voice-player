@@ -17,13 +17,14 @@ bash -n "$REPO_ROOT/uninstall.sh"
 echo "  ✓ Syntax valid for install.sh and uninstall.sh"
 
 # 2. Prepare Sandbox Environment
+CURRENT_VERSION="$(cat "$REPO_ROOT/VERSION" | tr -d '[:space:]')"
 TEMP_BASE="$(python -c 'import tempfile; print(tempfile.gettempdir().replace("\\", "/"))')"
 TMP_SANDBOX="$TEMP_BASE/vp-test-sandbox-$$"
 rm -rf "$TMP_SANDBOX"
 mkdir -p "$TMP_SANDBOX/home" "$TMP_SANDBOX/mock_release"
 
 # Build mock distribution package from local repo files
-MOCK_PKG="$TMP_SANDBOX/mock_release/voice-player-1.2.4.zip"
+MOCK_PKG="$TMP_SANDBOX/mock_release/voice-player-$CURRENT_VERSION.zip"
 echo "[2/5] Building local test archive ($MOCK_PKG)..."
 python -c "
 import zipfile
@@ -42,7 +43,7 @@ echo "[3/5] Testing Linux install & uninstall lifecycle..."
 LINUX_HOME="$TMP_SANDBOX/home/linux_user"
 mkdir -p "$LINUX_HOME"
 
-TARGET_DIR="$LINUX_HOME/.voice-player/versions/1.2.4"
+TARGET_DIR="$LINUX_HOME/.voice-player/versions/$CURRENT_VERSION"
 mkdir -p "$TARGET_DIR"
 python -c "
 import zipfile
@@ -50,13 +51,13 @@ with zipfile.ZipFile(r'$MOCK_PKG') as z:
     z.extractall(r'$TARGET_DIR')
 "
 mkdir -p "$LINUX_HOME/.voice-player"
-echo '{"version": "1.2.4"}' > "$LINUX_HOME/.voice-player/current-version.json"
+echo "{\"version\": \"$CURRENT_VERSION\"}" > "$LINUX_HOME/.voice-player/current-version.json"
 
 # Launcher script
 mkdir -p "$LINUX_HOME/.local/bin"
 cat << EOF > "$LINUX_HOME/.local/bin/voiceplayer"
 #!/usr/bin/env bash
-exec python "$LINUX_HOME/.voice-player/versions/1.2.4/app.py" "\$@"
+exec python "$LINUX_HOME/.voice-player/versions/$CURRENT_VERSION/app.py" "\$@"
 EOF
 chmod +x "$LINUX_HOME/.local/bin/voiceplayer"
 
@@ -78,7 +79,7 @@ cp "$LINUX_HOME/.voice-player/uninstall.sh" "$LINUX_HOME/.local/bin/voiceplayer-
 chmod +x "$LINUX_HOME/.local/bin/voiceplayer-uninstall"
 
 # Verification of Linux installation
-[ -f "$LINUX_HOME/.voice-player/versions/1.2.4/app.py" ] || { echo "❌ Linux: app.py missing"; exit 1; }
+[ -f "$LINUX_HOME/.voice-player/versions/$CURRENT_VERSION/app.py" ] || { echo "❌ Linux: app.py missing"; exit 1; }
 [ -f "$LINUX_HOME/.voice-player/current-version.json" ] || { echo "❌ Linux: current-version.json missing"; exit 1; }
 [ -x "$LINUX_HOME/.local/bin/voiceplayer" ] || { echo "❌ Linux: launcher not executable"; exit 1; }
 [ -f "$LINUX_HOME/.local/share/applications/voiceplayer.desktop" ] || { echo "❌ Linux: desktop entry missing"; exit 1; }
@@ -97,7 +98,7 @@ echo "[4/5] Testing macOS install & uninstall lifecycle..."
 MAC_HOME="$TMP_SANDBOX/home/mac_user"
 mkdir -p "$MAC_HOME/Applications"
 
-TARGET_DIR="$MAC_HOME/.voice-player/versions/1.2.4"
+TARGET_DIR="$MAC_HOME/.voice-player/versions/$CURRENT_VERSION"
 mkdir -p "$TARGET_DIR"
 python -c "
 import zipfile
@@ -105,7 +106,7 @@ with zipfile.ZipFile(r'$MOCK_PKG') as z:
     z.extractall(r'$TARGET_DIR')
 "
 mkdir -p "$MAC_HOME/.voice-player"
-echo '{"version": "1.2.4"}' > "$MAC_HOME/.voice-player/current-version.json"
+echo "{\"version\": \"$CURRENT_VERSION\"}" > "$MAC_HOME/.voice-player/current-version.json"
 
 # Native macOS .app bundle
 MAC_APP="$MAC_HOME/Applications/VoicePlayer.app"
@@ -114,7 +115,7 @@ mkdir -p "$MAC_APP/Contents/MacOS" "$MAC_APP/Contents/Resources"
 cat << EOF > "$MAC_APP/Contents/MacOS/VoicePlayer"
 #!/usr/bin/env bash
 export TK_SILENCE_DEPRECATION=1
-exec python "$MAC_HOME/.voice-player/versions/1.2.4/app.py" "\$@"
+exec python "$MAC_HOME/.voice-player/versions/$CURRENT_VERSION/app.py" "\$@"
 EOF
 chmod +x "$MAC_APP/Contents/MacOS/VoicePlayer"
 
@@ -126,7 +127,7 @@ cat << EOF > "$MAC_APP/Contents/Info.plist"
     <key>CFBundleName</key>
     <string>VoicePlayer</string>
     <key>CFBundleVersion</key>
-    <string>1.2.4</string>
+    <string>$CURRENT_VERSION</string>
 </dict>
 </plist>
 EOF
@@ -134,7 +135,7 @@ EOF
 MAC_LAUNCHER="$MAC_HOME/Applications/VoicePlayer.command"
 cat << EOF > "$MAC_LAUNCHER"
 #!/usr/bin/env bash
-exec python "$MAC_HOME/.voice-player/versions/1.2.4/app.py" "\$@"
+exec python "$MAC_HOME/.voice-player/versions/$CURRENT_VERSION/app.py" "\$@"
 EOF
 chmod +x "$MAC_LAUNCHER"
 
@@ -151,9 +152,9 @@ chmod +x "$MAC_HOME/.local/bin/voiceplayer-uninstall"
 echo '{"rate": 1.25}' > "$MAC_HOME/.voice-player-prefs.json"
 
 # Verification of macOS installation
-[ -f "$MAC_HOME/.voice-player/versions/1.2.4/app.py" ] || { echo "❌ macOS: app.py missing"; exit 1; }
+[ -f "$MAC_HOME/.voice-player/versions/$CURRENT_VERSION/app.py" ] || { echo "❌ macOS: app.py missing"; exit 1; }
 [ -x "$MAC_APP/Contents/MacOS/VoicePlayer" ] || { echo "❌ macOS: .app binary missing"; exit 1; }
-grep -q "<string>1.2.4</string>" "$MAC_APP/Contents/Info.plist" || { echo "❌ macOS: Info.plist version mismatch"; exit 1; }
+grep -q "<string>$CURRENT_VERSION</string>" "$MAC_APP/Contents/Info.plist" || { echo "❌ macOS: Info.plist version mismatch"; exit 1; }
 [ -x "$MAC_HOME/Applications/VoicePlayer.command" ] || { echo "❌ macOS: .command launcher missing"; exit 1; }
 [ -x "$MAC_HOME/.local/bin/voiceplayer" ] || { echo "❌ macOS: ~/.local/bin/voiceplayer missing"; exit 1; }
 echo "  ✓ macOS installation structure and .app bundle verified"

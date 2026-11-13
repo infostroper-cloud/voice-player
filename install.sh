@@ -93,7 +93,7 @@ else
         DETECTED_VER=$(curl -fsSL https://api.github.com/repos/infostroper-cloud/voice-player/releases/latest 2>/dev/null | grep -m 1 '"tag_name":' | sed -E 's/.*"tag_name":\s*"v?([^"]+)".*/\1/' || true)
     fi
     if [ -z "$DETECTED_VER" ]; then
-        DETECTED_VER="1.2.4"
+        DETECTED_VER="1.2.5"
     fi
 fi
 

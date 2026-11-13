@@ -1,10 +1,8 @@
-# VoicePlayer Windows Installer (One-Click / Zero-SmartScreen)
-# https://github.com/infostroper-cloud/voice-player
-
+﻿$ErrorActionPreference = 'Stop'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 $ErrorActionPreference = "Stop"
 
-$Version = "1.2.2"
+$Version = "1.2.5"
 $Repo = "infostroper-cloud/voice-player"
 $InstallDir = Join-Path $env:LOCALAPPDATA "Programs\VoicePlayer"
 $ZipUrl = "https://github.com/$Repo/releases/download/voice-player-v$Version/voice-player-$Version.zip"
@@ -125,7 +123,7 @@ Write-Host "  Запускаю VoicePlayer..." -ForegroundColor Cyan
 
 $LaunchCmd = Join-Path $InstallDir "launch.cmd"
 if (Test-Path $LaunchCmd) {
-    Start-Process -FilePath $LaunchCmd -WindowStyle Hidden
+    Start-Process -FilePath "cmd.exe" -ArgumentList "/c `"$LaunchCmd`"" -WindowStyle Hidden
 } else {
     $LaunchPyw = Join-Path $InstallDir "launch.pyw"
     $Pyw = Join-Path (Split-Path $PythonExe) "pythonw.exe"
