@@ -1,10 +1,10 @@
-# VoicePlayer Windows Installer (One-Click / Zero-SmartScreen)
+﻿# VoicePlayer Windows Installer (One-Click / Zero-SmartScreen)
 # https://github.com/infostroper-cloud/voice-player
 
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 $ErrorActionPreference = "Stop"
 
-$Version = "1.2.2"
+$Version = "1.2.3"
 $Repo = "infostroper-cloud/voice-player"
 $InstallDir = Join-Path $env:LOCALAPPDATA "Programs\VoicePlayer"
 $ZipUrl = "https://github.com/$Repo/releases/download/voice-player-v$Version/voice-player-$Version.zip"

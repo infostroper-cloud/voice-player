@@ -8527,15 +8527,22 @@ class VoicePlayerApp:
     def _speak_selection(self):
         # копируем текущее выделение из активного окна (Ctrl+C) и озвучиваем
         self._send_ctrl_c()
-        self.root.after(170, self._speak_clipboard)
+        self.root.after(240, self._speak_clipboard)
 
     def _send_ctrl_c(self):
         try:
             import ctypes
             user32 = ctypes.windll.user32
-            VK_CONTROL, VK_C, KEYEVENTF_KEYUP = 0x11, 0x43, 0x0002
+            VK_MENU, VK_CONTROL, VK_C, VK_S = 0x12, 0x11, 0x43, 0x53
+            KEYEVENTF_KEYUP = 0x0002
+            # Программно отпускаем Alt и S, чтобы приложение не получило Ctrl+Alt+C
+            user32.keybd_event(VK_MENU, 0, KEYEVENTF_KEYUP, 0)
+            user32.keybd_event(VK_S, 0, KEYEVENTF_KEYUP, 0)
+            time.sleep(0.04)
+            # Отправляем стандартное копирование Ctrl+C
             user32.keybd_event(VK_CONTROL, 0, 0, 0)
             user32.keybd_event(VK_C, 0, 0, 0)
+            time.sleep(0.02)
             user32.keybd_event(VK_C, 0, KEYEVENTF_KEYUP, 0)
             user32.keybd_event(VK_CONTROL, 0, KEYEVENTF_KEYUP, 0)
         except Exception as e:

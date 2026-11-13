@@ -433,6 +433,9 @@ exit /b 0
 
 UNINSTALL_PS1 = """param([switch]$Quiet)
 
+# Гарантируем правильную кодировку вывода в консоль и диалогах
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+
 # 1. Немедленно удаляем запись из «Установленных приложений» Windows (HKCU Uninstall)
 Remove-Item -Path "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\VoicePlayer" -Recurse -Force -ErrorAction SilentlyContinue
 
@@ -495,7 +498,7 @@ def register_windows_uninstaller(version: str = "") -> None:
 
         ps1_file = h / "uninstall.ps1"
         cmd_file = h / "uninstall.cmd"
-        ps1_file.write_text(UNINSTALL_PS1, encoding="utf-8")
+        ps1_file.write_text(UNINSTALL_PS1, encoding="utf-8-sig")
         cmd_file.write_text(UNINSTALL_CMD, encoding="ascii", errors="ignore")
 
         ico = h / "icon.ico"

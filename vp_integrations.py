@@ -224,12 +224,12 @@ HOOK_TOOLS = {
         "label": "DeepSeek Harness",
         "icon": "🐋",
         "category": "agents",
-        "home": ".deepseek",
-        "path": ".deepseek/config.json",
+        "home": "AppData/Local/Programs/DeepSeek Harness",
+        "path": "AppData/Roaming/@deepseek-ai/dsh-desktop/config.json",
         "event": "afterResponse",
         "entry": _generic_entry,
-        "desc": "DeepSeek агент и тестовый харнесс",
-        "setup_tip": "pip install deepseek-harness",
+        "desc": "DeepSeek десктоп-агент и траектории",
+        "setup_tip": "https://deepseek.com",
     },
     # 16. Qwen Code
     "qwen-code": {
@@ -269,15 +269,15 @@ HOOK_TOOLS = {
     },
     # 19. Comet
     "comet": {
-        "label": "Comet",
+        "label": "Comet (Perplexity)",
         "icon": "☄️",
         "category": "chat",
-        "home": ".comet",
-        "path": ".comet/settings.json",
+        "home": "AppData/Local/Perplexity/Comet",
+        "path": "AppData/Local/Perplexity/Comet/settings.json",
         "event": "onResponse",
         "entry": _generic_entry,
-        "desc": "Comet AI ассистент",
-        "setup_tip": "https://comet.com",
+        "desc": "AI-браузер Comet от Perplexity",
+        "setup_tip": "https://perplexity.ai/comet",
     },
     # 20. VS Code
     "vscode": {
@@ -432,6 +432,7 @@ def _is_installed(tool_id: str, home: Path) -> bool:
         return any(p.exists() for p in vscode_paths) or bool(shutil.which("code"))
     if tool_id == "perplexity":
         perp_paths = [
+            home / "AppData/Local/Perplexity",
             home / "AppData/Roaming/Perplexity",
             home / "AppData/Local/Programs/Perplexity",
             home / ".config/perplexity",
@@ -439,7 +440,24 @@ def _is_installed(tool_id: str, home: Path) -> bool:
         ]
         return any(p.exists() for p in perp_paths) or bool(shutil.which("perplexity"))
     if tool_id == "comet":
-        return (home / "AppData/Roaming/Comet").exists() or bool(shutil.which("comet"))
+        comet_paths = [
+            home / "AppData/Local/Perplexity/Comet",
+            home / "AppData/Local/Perplexity/Comet/Application/comet.exe",
+            home / "AppData/Roaming/Comet",
+            Path("/Applications/Comet.app"),
+        ]
+        return any(p.exists() for p in comet_paths) or bool(shutil.which("comet"))
+    if tool_id == "deepseek":
+        dsh_paths = [
+            home / "AppData/Local/Programs/DeepSeek Harness",
+            home / "AppData/Local/Programs/DeepSeek Harness/DeepSeek Harness.exe",
+            home / "AppData/Roaming/@deepseek-ai",
+            home / "AppData/Local/@deepseek-aidsh-desktop-updater",
+            home / ".deepseek",
+            Path("/Applications/DeepSeek Harness.app"),
+            Path("/Applications/DeepSeek.app"),
+        ]
+        return any(p.exists() for p in dsh_paths) or bool(shutil.which("deepseek")) or bool(shutil.which("deepseek-harness"))
     if tool_id == "hermes-desktop":
         hermes_paths = [
             home / "AppData/Local/Programs/Hermes",
