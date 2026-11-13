@@ -32,6 +32,9 @@ NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
 
 def home_dir() -> Path:
+    env = os.environ.get("VOICE_PLAYER_HOME")
+    if env:
+        return Path(env).resolve()
     return Path.home() / ".voice-player"
 
 
@@ -383,12 +386,19 @@ def stable_hook_home(app_dir: Path) -> Path:
 
 
 LAUNCHER = '''import pathlib, subprocess, sys
-root = pathlib.Path.home() / ".voice-player" / "versions"
+root = pathlib.Path(__file__).resolve().parent / "versions"
+if not root.exists():
+    root = pathlib.Path.home() / ".voice-player" / "versions"
 dirs = sorted((d for d in root.iterdir() if d.name[:1].isdigit() and (d / "vp_updater.py").exists()),
               key=lambda d: [int(x) for x in d.name.split(".")])
-sys.path.insert(0, str(dirs[-1]))
+if not dirs:
+    dirs = [pathlib.Path(__file__).resolve().parent]
+target = dirs[-1]
+sys.path.insert(0, str(target))
 import vp_updater
-target = vp_updater.best_installed()
+best = vp_updater.best_installed()
+if best:
+    target = best
 vp_updater._note_start(target)
 subprocess.Popen([vp_updater.gui_python(), str(target / "app.py")], cwd=str(target))
 '''
@@ -446,9 +456,12 @@ if (Test-Path $hooksDir) {
     Remove-Item $hooksDir -Recurse -Force -ErrorAction SilentlyContinue
 }
 
-# 5. Очищаем рабочую папку VoicePlayer в фоне через cmd
-$vpHome = Join-Path $env:USERPROFILE ".voice-player"
-Start-Process -FilePath "cmd.exe" -ArgumentList "/c timeout /t 1 /nobreak >nul & rd /s /q `"$vpHome`"" -WindowStyle Hidden
+# 5. Очищаем установочную папку VoicePlayer в фоне через cmd
+$installDir = "$PSScriptRoot"
+if (-not $installDir -or -not (Test-Path $installDir)) {
+    $installDir = Join-Path $env:USERPROFILE ".voice-player"
+}
+Start-Process -FilePath "cmd.exe" -ArgumentList "/c timeout /t 1 /nobreak >nul & rd /s /q `"$installDir`"" -WindowStyle Hidden
 
 if (-not $Quiet) {
     try {
@@ -525,36 +538,65 @@ def register_windows_uninstaller(version: str = "") -> None:
         pass
 
 
-def create_shortcuts() -> None:
-    """Ярлык указывает на %USERPROFILE%: один и тот же файл на рабочем столе OneDrive
-    работает на каждом компьютере, где плеер установлен."""
+def create_shortcuts(desktop: bool = True, start_menu: bool = True, auto_start: bool = False) -> None:
+    """Создать ярлыки VoicePlayer на Рабочем столе и в меню «Пуск»."""
     if os.name != "nt":
         return
+    h = home_dir()
     best = best_installed()
     if best and (best / "icon.ico").is_file():
         try:
-            shutil.copy2(best / "icon.ico", home_dir() / "icon.ico")
+            shutil.copy2(best / "icon.ico", h / "icon.ico")
         except Exception:
             pass
-    script = (
-        "$s = New-Object -ComObject WScript.Shell;"
-        "foreach ($d in @([Environment]::GetFolderPath('Desktop'), [Environment]::GetFolderPath('Programs'))) {"
-        "$l = $s.CreateShortcut((Join-Path $d 'VoicePlayer.lnk'));"
-        "$l.TargetPath = '%USERPROFILE%\\.voice-player\\launch.cmd'; $l.WindowStyle = 7;"
-        "$l.IconLocation = '%USERPROFILE%\\.voice-player\\icon.ico'; $l.Save() }"
-    )
-    subprocess.run(["powershell", "-NoProfile", "-Command", script], check=True, timeout=60, creationflags=NO_WINDOW)
+    cmd_path = str(h / "launch.cmd")
+    ico_path = str(h / "icon.ico")
+    dirs = []
+    if desktop:
+        dirs.append("[Environment]::GetFolderPath('Desktop')")
+    if start_menu:
+        dirs.append("[Environment]::GetFolderPath('Programs')")
+    if dirs:
+        dirs_expr = "@(" + ", ".join(dirs) + ")"
+        script = (
+            f"$s = New-Object -ComObject WScript.Shell;"
+            f"foreach ($d in {dirs_expr}) {{"
+            f"$l = $s.CreateShortcut((Join-Path $d 'VoicePlayer.lnk'));"
+            f"$l.TargetPath = '{cmd_path}'; $l.WorkingDirectory = '{str(h)}'; $l.WindowStyle = 7;"
+            f"$l.IconLocation = '{ico_path}'; $l.Save() }}"
+        )
+        try:
+            subprocess.run(["powershell", "-NoProfile", "-Command", script], check=True, timeout=60, creationflags=NO_WINDOW)
+        except Exception:
+            pass
+    if auto_start:
+        try:
+            import winreg
+            run_key = r"Software\Microsoft\Windows\CurrentVersion\Run"
+            with winreg.CreateKey(winreg.HKEY_CURRENT_USER, run_key) as k:
+                winreg.SetValueEx(k, "VoicePlayer", 0, winreg.REG_SZ, f'"{cmd_path}"')
+        except Exception:
+            pass
     register_windows_uninstaller()
 
 
 def main(argv: list) -> int:
-    """Первая установка: python vp_updater.py --install архив.zip [--no-shortcuts]"""
+    """Первая установка: python vp_updater.py --install архив.zip [--dest <папка>] [--no-desktop] [--no-startmenu] [--autostart]"""
     if len(argv) < 3 or argv[1] != "--install":
         print(main.__doc__)
         return 2
+    dest = None
+    if "--dest" in argv:
+        d_idx = argv.index("--dest")
+        if d_idx + 1 < len(argv):
+            dest = argv[d_idx + 1]
+            os.environ["VOICE_PLAYER_HOME"] = str(Path(dest).resolve())
     final = install_zip(Path(argv[2]))
-    if "--no-shortcuts" not in argv:
-        create_shortcuts()
+    create_shortcuts(
+        desktop="--no-desktop" not in argv and "--no-shortcuts" not in argv,
+        start_menu="--no-startmenu" not in argv and "--no-shortcuts" not in argv,
+        auto_start="--autostart" in argv
+    )
     print(f"Установлена версия {final.name}: {final}")
     return 0
 

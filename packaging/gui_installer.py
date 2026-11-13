@@ -1,12 +1,13 @@
-"""Автономный графический установщик VoicePlayer-Setup-<ver>.exe (собирается через PyInstaller --onefile).
+"""Классический многостраничный графический установщик VoicePlayer-Setup-<ver>.exe.
 
-Что делает:
-1. Внутри .exe уже вшит актуальный архив voice-player-<ver>.zip и иконка icon.ico.
-2. Показывает аккуратное окно в фирменном изумрудно-мятном стиле (или ставит тихо при флаге /SILENT).
-3. Находит установленный Python 3.10+, а если на компьютере пользователя Python ещё не стоит —
-   автоматически скачивает и тихо ставит официальный Python 3.12 с python.org.
-4. Распаковывает VoicePlayer в ~/.voice-player/versions/<ver>/, ставит зависимости, проверяет --self-test,
-   создаёт ярлыки на Рабочем столе и в меню «Пуск» и запускает плеер!
+Шаги мастера установки:
+1. Лицензионное соглашение (EULA / MIT License) с переключателями принятия условий.
+2. Выбор папки установки с кнопкой «Обзор...» и расчётом свободного места на диске.
+3. Выбор дополнительных задач: ярлык на Рабочем столе, в меню «Пуск», автозапуск.
+4. Процесс установки: проверка Python, распаковка, настройка библиотек, регистрация uninstaller.
+5. Завершение мастера: чекбокс «Запустить VoicePlayer» и кнопка «Завершить».
+
+Поддерживает также тихий режим (/SILENT или /VERYSILENT).
 """
 from __future__ import annotations
 
@@ -21,10 +22,48 @@ import tkinter as tk
 import urllib.request
 import zipfile
 from pathlib import Path
-from tkinter import ttk, messagebox
+from tkinter import ttk, filedialog, messagebox
 
 NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 PY_INSTALLER_URL = "https://www.python.org/ftp/python/3.12.8/python-3.12.8-amd64.exe"
+
+LICENSE_TEXT = """ЛИЦЕНЗИОННОЕ СОГЛАШЕНИЕ С КОНЕЧНЫМ ПОЛЬЗОВАТЕЛЕМ (EULA)
+VoicePlayer — Озвучка ИИ и голосовой ввод
+
+1. УСЛОВИЯ ИСПОЛЬЗОВАНИЯ
+VoicePlayer распространяется бесплатно по открытой лицензии MIT.
+Вы имеете право свободно использовать программу в личных и коммерческих целях,
+устанавливать её на любое количество компьютеров без скрытых платежей и подписок.
+
+2. КОНФИДЕНЦИАЛЬНОСТЬ И БЕЗОПАСНОСТЬ ДАННЫХ
+• Полная приватность: локальные нейромодели синтеза и распознавания речи работают
+  напрямую на вашем компьютере.
+• VoicePlayer не сохраняет, не анализирует и не передает третьим лицам
+  содержимое ваших диалогов с нейросетями, буфера обмена или аудиозаписей.
+• Сетевое подключение используется исключительно для автообновления программы
+  и облачных голосов Microsoft Edge TTS (по выбору пользователя).
+
+3. ОТКАЗ ОТ ОТВЕТСТВЕННОСТИ (MIT LICENSE)
+Copyright (c) 2026 Anton Sorokin and VoicePlayer Contributors.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+"""
 
 
 def _res_dir() -> Path:
@@ -39,6 +78,10 @@ def _bundled_zip() -> Path:
     out_zips = sorted((Path(__file__).resolve().parent / "Output").glob("voice-player-*.zip"))
     if out_zips:
         return out_zips[-1]
+    # Поиск в родительской папке проекта (при запуске из репозитория)
+    root_zips = sorted(Path(__file__).resolve().parents[1].glob("voice-player-*.zip"))
+    if root_zips:
+        return root_zips[-1]
     raise FileNotFoundError("Внутри установщика не найден архив voice-player-*.zip")
 
 
@@ -86,31 +129,15 @@ def _ensure_python(status_cb) -> str:
     return py
 
 
-def run_install(status_cb, start_app: bool = True) -> str:
-    zp = _bundled_zip()
-    py = _ensure_python(status_cb)
-    status_cb("Распаковываю VoicePlayer и проверяю аудио-библиотеки...")
-    with tempfile.TemporaryDirectory() as td:
-        with zipfile.ZipFile(zp) as z:
-            z.extract("vp_updater.py", td)
-        updater_py = Path(td) / "vp_updater.py"
-        r = subprocess.run([py, str(updater_py), "--install", str(zp)],
-                           capture_output=True, text=True, timeout=900, creationflags=NO_WINDOW)
-        if r.returncode != 0:
-            err = (r.stderr or r.stdout or "ошибка установки").strip().splitlines()[-1]
-            raise RuntimeError(err[:240])
-        try:
-            sys.path.insert(0, td)
-            import vp_updater
-            vp_updater.register_windows_uninstaller(zp.stem.replace("voice-player-", ""))
-        except Exception:
-            pass
-    launch_pyw = Path.home() / ".voice-player" / "launch.pyw"
-    pyw = str(Path(py).with_name("pythonw.exe")) if Path(py).with_name("pythonw.exe").is_file() else py
-    if start_app and launch_pyw.is_file():
-        status_cb("Запускаю VoicePlayer...")
-        subprocess.Popen([pyw, str(launch_pyw)], creationflags=NO_WINDOW)
-    return zp.stem.replace("voice-player-", "")
+def _get_free_space_gb(path_str: str) -> float:
+    try:
+        p = Path(path_str)
+        while not p.exists() and p != p.parent:
+            p = p.parent
+        usage = shutil.disk_usage(str(p))
+        return usage.free / (1024 ** 3)
+    except Exception:
+        return 0.0
 
 
 def _apply_dark_titlebar(win: tk.Tk):
@@ -132,88 +159,509 @@ def _apply_dark_titlebar(win: tk.Tk):
         pass
 
 
-def main():
-    if "/SILENT" in [a.upper() for a in sys.argv[1:]]:
-        run_install(lambda _m: None, start_app=True)
-        return
+def run_install(
+    dest_dir: Path,
+    desktop_shortcut: bool,
+    start_menu_shortcut: bool,
+    auto_start: bool,
+    status_cb,
+    start_app: bool = False
+) -> str:
+    """Выполнить установку VoicePlayer в выбранную папку."""
+    zp = _bundled_zip()
+    py = _ensure_python(status_cb)
+    dest_dir.mkdir(parents=True, exist_ok=True)
 
-    root = tk.Tk()
-    root.title("Установка VoicePlayer")
-    root.geometry("500x260")
-    root.resizable(False, False)
-    root.configure(bg="#131615")
-    ico = _res_dir() / "icon.ico"
-    if ico.is_file():
+    status_cb(f"Распаковываю VoicePlayer в {dest_dir.name}...")
+    with tempfile.TemporaryDirectory() as td:
+        with zipfile.ZipFile(zp) as z:
+            z.extract("vp_updater.py", td)
+        updater_py = Path(td) / "vp_updater.py"
+
+        cmd = [py, str(updater_py), "--install", str(zp), "--dest", str(dest_dir)]
+        if not desktop_shortcut:
+            cmd.append("--no-desktop")
+        if not start_menu_shortcut:
+            cmd.append("--no-startmenu")
+        if auto_start:
+            cmd.append("--autostart")
+
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=900, creationflags=NO_WINDOW)
+        if r.returncode != 0:
+            err = (r.stderr or r.stdout or "ошибка установки").strip().splitlines()[-1]
+            raise RuntimeError(err[:240])
+
+    launch_cmd = dest_dir / "launch.cmd"
+    launch_pyw = dest_dir / "launch.pyw"
+    pyw = str(Path(py).with_name("pythonw.exe")) if Path(py).with_name("pythonw.exe").is_file() else py
+
+    if start_app:
+        status_cb("Запускаю VoicePlayer...")
+        if launch_cmd.is_file():
+            subprocess.Popen([str(launch_cmd)], creationflags=NO_WINDOW)
+        elif launch_pyw.is_file():
+            subprocess.Popen([pyw, str(launch_pyw)], creationflags=NO_WINDOW)
+
+    return zp.stem.replace("voice-player-", "")
+
+
+class ClassicInstallerWizard:
+    """Классический визард установщика Windows."""
+
+    def __init__(self, root: tk.Tk):
+        self.root = root
+        self.root.title("Установка VoicePlayer")
+        self.root.geometry("580x430")
+        self.root.resizable(False, False)
+        self.root.configure(bg="#131615")
+
+        # DPI awareness
         try:
-            root.iconbitmap(default=str(ico))
+            ctypes.windll.shcore.SetProcessDpiAwareness(1)
         except Exception:
-            pass
-    _apply_dark_titlebar(root)
+            try:
+                ctypes.windll.user32.SetProcessDPIAware()
+            except Exception:
+                pass
 
-    # Центрируем окно
-    root.update_idletasks()
-    sw, sh = root.winfo_screenwidth(), root.winfo_screenheight()
-    root.geometry(f"500x260+{(sw - 500) // 2}+{(sh - 260) // 2}")
+        ico = _res_dir() / "icon.ico"
+        if not ico.is_file():
+            ico = Path(__file__).resolve().parents[1] / "icon.ico"
+        if ico.is_file():
+            try:
+                self.root.iconbitmap(default=str(ico))
+            except Exception:
+                pass
 
-    frame = tk.Frame(root, bg="#131615", padx=28, pady=24)
-    frame.pack(fill="both", expand=True)
+        _apply_dark_titlebar(self.root)
 
-    tk.Label(frame, text="VoicePlayer — Голосовой плеер ИИ", bg="#131615", fg="#e8ecea",
-             font=("Segoe UI Semibold", 14), anchor="w").pack(fill="x")
-    tk.Label(frame, text="Автоозвучка диалогов из Antigravity, Codex, Claude Code и Cursor\nлокальным нейроголосом без интернета и подписок.",
-             bg="#131615", fg="#7c8782", font=("Segoe UI", 9), justify="left", anchor="w").pack(fill="x", pady=(6, 18))
+        # Центрирование окна
+        self.root.update_idletasks()
+        sw, sh = self.root.winfo_screenwidth(), self.root.winfo_screenheight()
+        self.root.geometry(f"580x430+{(sw - 580) // 2}+{(sh - 430) // 2}")
 
-    lbl_status = tk.Label(frame, text="Готов к установке (ярлык появится на Рабочем столе)",
-                          bg="#131615", fg="#7ee2b8", font=("Segoe UI Semibold", 10), anchor="w")
-    lbl_status.pack(fill="x", pady=(0, 10))
+        # Состояние визарда
+        self.current_page = 0
+        default_folder = Path(os.environ.get("LOCALAPPDATA", Path.home())) / "Programs" / "VoicePlayer"
+        self.var_dest = tk.StringVar(value=str(default_folder))
+        self.var_license = tk.StringVar(value="disagree")
+        self.var_desktop = tk.BooleanVar(value=True)
+        self.var_startmenu = tk.BooleanVar(value=True)
+        self.var_autostart = tk.BooleanVar(value=False)
+        self.var_launch_now = tk.BooleanVar(value=True)
 
-    bar = ttk.Progressbar(frame, mode="indeterminate", length=440)
-    bar.pack(fill="x", pady=(0, 18))
+        self._installed_ver = ""
+        self._build_layout()
+        self._show_page(0)
 
-    btn_row = tk.Frame(frame, bg="#131615")
-    btn_row.pack(fill="x")
+    def _build_layout(self):
+        # 1. Верхний заголовок визарда (Header Banner)
+        self.header_frame = tk.Frame(self.root, bg="#181d1b", height=66, highlightthickness=0)
+        self.header_frame.pack(side="top", fill="x")
+        self.header_frame.pack_propagate(False)
 
-    def set_status(msg: str):
-        root.after(0, lambda: lbl_status.configure(text=msg))
+        header_inner = tk.Frame(self.header_frame, bg="#181d1b", padx=20, pady=10)
+        header_inner.pack(fill="both", expand=True)
 
-    def start_install():
-        btn_install.configure(state="disabled", text="Установка...")
-        bar.start(12)
+        header_text_box = tk.Frame(header_inner, bg="#181d1b")
+        header_text_box.pack(side="left", fill="both", expand=True)
+
+        self.lbl_head_title = tk.Label(header_text_box, text="Лицензионное соглашение", bg="#181d1b",
+                                       fg="#e8ecea", font=("Segoe UI Semibold", 11), anchor="w")
+        self.lbl_head_title.pack(fill="x")
+
+        self.lbl_head_sub = tk.Label(header_text_box, text="Пожалуйста, ознакомьтесь с условиями перед продолжением.",
+                                     bg="#181d1b", fg="#7c8782", font=("Segoe UI", 9), anchor="w")
+        self.lbl_head_sub.pack(fill="x", pady=(2, 0))
+
+        lbl_badge = tk.Label(header_inner, text="🔊 VoicePlayer", bg="#222b27", fg="#7ee2b8",
+                             font=("Segoe UI Semibold", 9), padx=8, pady=4)
+        lbl_badge.pack(side="right")
+
+        tk.Frame(self.root, bg="#262e2b", height=1).pack(side="top", fill="x")
+
+        # 2. Нижняя панель навигации (Bottom Bar)
+        tk.Frame(self.root, bg="#262e2b", height=1).pack(side="bottom", fill="x")
+        self.nav_frame = tk.Frame(self.root, bg="#131615", padx=20, pady=12)
+        self.nav_frame.pack(side="bottom", fill="x")
+
+        self.lbl_ver_badge = tk.Label(self.nav_frame, text="v1.2.0 · Open Source", bg="#131615",
+                                      fg="#59635f", font=("Segoe UI", 9))
+        self.lbl_ver_badge.pack(side="left")
+
+        self.btn_cancel = tk.Button(
+            self.nav_frame, text="Отмена", command=self._confirm_cancel,
+            bg="#1c211f", fg="#e8ecea", activebackground="#2a322f", activeforeground="#e8ecea",
+            font=("Segoe UI", 9), bd=0, padx=14, pady=6, cursor="hand2"
+        )
+        self.btn_cancel.pack(side="right", padx=(8, 0))
+
+        self.btn_next = tk.Button(
+            self.nav_frame, text="Далее >", command=self._go_next,
+            bg="#7ee2b8", fg="#0d0f0e", activebackground="#6ad6a9", activeforeground="#0d0f0e",
+            font=("Segoe UI Semibold", 9), bd=0, padx=18, pady=6, cursor="hand2"
+        )
+        self.btn_next.pack(side="right", padx=(6, 0))
+
+        self.btn_back = tk.Button(
+            self.nav_frame, text="< Назад", command=self._go_back,
+            bg="#1c211f", fg="#e8ecea", activebackground="#2a322f", activeforeground="#e8ecea",
+            font=("Segoe UI", 9), bd=0, padx=14, pady=6, cursor="hand2"
+        )
+        self.btn_back.pack(side="right")
+
+        # 3. Основная область страниц (Body Container)
+        self.body_container = tk.Frame(self.root, bg="#131615", padx=24, pady=14)
+        self.body_container.pack(side="top", fill="both", expand=True)
+
+        self._build_page_license()
+        self._build_page_dest()
+        self._build_page_tasks()
+        self._build_page_install()
+        self._build_page_finish()
+
+    # ------------------- Страница 0: Лицензионное соглашение -------------------
+    def _build_page_license(self):
+        self.page_license = tk.Frame(self.body_container, bg="#131615")
+
+        tk.Label(self.page_license, text="Перед установкой программы необходимо принять условия лицензии:",
+                 bg="#131615", fg="#cfd5d2", font=("Segoe UI", 9), anchor="w").pack(fill="x", pady=(0, 6))
+
+        text_wrap = tk.Frame(self.page_license, bg="#1c211f", highlightthickness=1, highlightbackground="#262e2b")
+        text_wrap.pack(fill="both", expand=True, pady=(0, 10))
+
+        sb = ttk.Scrollbar(text_wrap, orient="vertical")
+        sb.pack(side="right", fill="y")
+
+        self.txt_license = tk.Text(
+            text_wrap, bg="#1c211f", fg="#d1d8d5", insertbackground="#d1d8d5",
+            font=("Segoe UI", 8), wrap="word", bd=0, padx=10, pady=8, yscrollcommand=sb.set
+        )
+        self.txt_license.pack(side="left", fill="both", expand=True)
+        sb.configure(command=self.txt_license.yview)
+
+        self.txt_license.insert("1.0", LICENSE_TEXT)
+        self.txt_license.configure(state="disabled")
+
+        r1 = tk.Radiobutton(
+            self.page_license, text="Я принимаю условия соглашения", variable=self.var_license, value="agree",
+            command=self._on_license_toggle, bg="#131615", fg="#e8ecea", selectcolor="#1c211f",
+            activebackground="#131615", activeforeground="#7ee2b8", font=("Segoe UI Semibold", 9), cursor="hand2"
+        )
+        r1.pack(anchor="w", pady=(0, 2))
+
+        r2 = tk.Radiobutton(
+            self.page_license, text="Я не принимаю условия соглашения", variable=self.var_license, value="disagree",
+            command=self._on_license_toggle, bg="#131615", fg="#7c8782", selectcolor="#1c211f",
+            activebackground="#131615", activeforeground="#7c8782", font=("Segoe UI", 9), cursor="hand2"
+        )
+        r2.pack(anchor="w")
+
+    def _on_license_toggle(self):
+        if self.var_license.get() == "agree":
+            self.btn_next.configure(state="normal", bg="#7ee2b8", fg="#0d0f0e")
+        else:
+            self.btn_next.configure(state="disabled", bg="#202624", fg="#59635f")
+
+    # ------------------- Страница 1: Выбор папки установки -------------------
+    def _build_page_dest(self):
+        self.page_dest = tk.Frame(self.body_container, bg="#131615")
+
+        tk.Label(self.page_dest, text="Программа установит VoicePlayer в следующую папку.",
+                 bg="#131615", fg="#e8ecea", font=("Segoe UI", 9), anchor="w").pack(fill="x")
+        tk.Label(self.page_dest, text="Чтобы выбрать другую папку, нажмите «Обзор...»:",
+                 bg="#131615", fg="#7c8782", font=("Segoe UI", 9), anchor="w").pack(fill="x", pady=(2, 10))
+
+        row_dir = tk.Frame(self.page_dest, bg="#131615")
+        row_dir.pack(fill="x", pady=(0, 16))
+
+        self.ent_dest = ttk.Entry(row_dir, textvariable=self.var_dest, font=("Segoe UI", 9))
+        self.ent_dest.pack(side="left", fill="x", expand=True, padx=(0, 8))
+        self.var_dest.trace_add("write", lambda *_: self._update_free_space())
+
+        btn_browse = tk.Button(
+            row_dir, text="Обзор...", command=self._browse_folder,
+            bg="#1c211f", fg="#e8ecea", activebackground="#262e2b", activeforeground="#e8ecea",
+            font=("Segoe UI", 9), bd=0, padx=14, pady=5, cursor="hand2"
+        )
+        btn_browse.pack(side="right")
+
+        # Информационная плашка свободного места
+        info_card = tk.Frame(self.page_dest, bg="#181d1b", highlightthickness=1, highlightbackground="#262e2b",
+                             padx=14, pady=12)
+        info_card.pack(fill="x", pady=(4, 0))
+
+        tk.Label(info_card, text="Требуется свободного места на диске: ~45 МБ",
+                 bg="#181d1b", fg="#7c8782", font=("Segoe UI", 9), anchor="w").pack(fill="x")
+
+        self.lbl_free_space = tk.Label(info_card, text="Доступно на диске: расчет...",
+                                       bg="#181d1b", fg="#7ee2b8", font=("Segoe UI Semibold", 9), anchor="w")
+        self.lbl_free_space.pack(fill="x", pady=(4, 0))
+
+    def _browse_folder(self):
+        init_dir = self.var_dest.get()
+        if not Path(init_dir).exists():
+            init_dir = str(Path.home())
+        chosen = filedialog.askdirectory(initialdir=init_dir, title="Выберите папку для установки VoicePlayer")
+        if chosen:
+            self.var_dest.set(str(Path(chosen) / "VoicePlayer" if not chosen.lower().endswith("voiceplayer") else chosen))
+
+    def _update_free_space(self):
+        path_str = self.var_dest.get().strip()
+        if path_str:
+            free_gb = _get_free_space_gb(path_str)
+            self.lbl_free_space.configure(text=f"Доступно на диске: {free_gb:.1f} ГБ")
+
+    # ------------------- Страница 2: Дополнительные задачи -------------------
+    def _build_page_tasks(self):
+        self.page_tasks = tk.Frame(self.body_container, bg="#131615")
+
+        tk.Label(self.page_tasks, text="Выберите дополнительные ярлыки и параметры запуска программы:",
+                 bg="#131615", fg="#e8ecea", font=("Segoe UI", 9), anchor="w").pack(fill="x", pady=(0, 10))
+
+        card = tk.Frame(self.page_tasks, bg="#181d1b", highlightthickness=1, highlightbackground="#262e2b",
+                        padx=16, pady=14)
+        card.pack(fill="x", pady=(0, 12))
+
+        tk.Label(card, text="Ярлыки приложения:", bg="#181d1b", fg="#7ee2b8",
+                 font=("Segoe UI Semibold", 9), anchor="w").pack(fill="x", pady=(0, 6))
+
+        cb_desk = tk.Checkbutton(
+            card, text="Создать значок на Рабочем столе", variable=self.var_desktop,
+            bg="#181d1b", fg="#e8ecea", selectcolor="#1c211f", activebackground="#181d1b",
+            activeforeground="#7ee2b8", font=("Segoe UI", 9), cursor="hand2"
+        )
+        cb_desk.pack(anchor="w", pady=(0, 4))
+
+        cb_start = tk.Checkbutton(
+            card, text="Создать ярлык в меню «Пуск»", variable=self.var_startmenu,
+            bg="#181d1b", fg="#e8ecea", selectcolor="#1c211f", activebackground="#181d1b",
+            activeforeground="#7ee2b8", font=("Segoe UI", 9), cursor="hand2"
+        )
+        cb_start.pack(anchor="w")
+
+        card2 = tk.Frame(self.page_tasks, bg="#181d1b", highlightthickness=1, highlightbackground="#262e2b",
+                         padx=16, pady=14)
+        card2.pack(fill="x")
+
+        tk.Label(card2, text="Автозапуск:", bg="#181d1b", fg="#7ee2b8",
+                 font=("Segoe UI Semibold", 9), anchor="w").pack(fill="x", pady=(0, 6))
+
+        cb_auto = tk.Checkbutton(
+            card2, text="Запускать VoicePlayer при входе в Windows", variable=self.var_autostart,
+            bg="#181d1b", fg="#e8ecea", selectcolor="#1c211f", activebackground="#181d1b",
+            activeforeground="#7ee2b8", font=("Segoe UI", 9), cursor="hand2"
+        )
+        cb_auto.pack(anchor="w")
+
+    # ------------------- Страница 3: Процесс установки -------------------
+    def _build_page_install(self):
+        self.page_install = tk.Frame(self.body_container, bg="#131615")
+
+        self.lbl_install_step = tk.Label(self.page_install, text="Подготовка к установке...",
+                                         bg="#131615", fg="#e8ecea", font=("Segoe UI Semibold", 10), anchor="w")
+        self.lbl_install_step.pack(fill="x", pady=(16, 6))
+
+        self.install_bar = ttk.Progressbar(self.page_install, mode="indeterminate", length=520)
+        self.install_bar.pack(fill="x", pady=(0, 12))
+
+        self.lbl_install_detail = tk.Label(
+            self.page_install, text="Пожалуйста, подождите, пока мастер завершит установку файлов программы.",
+            bg="#131615", fg="#7c8782", font=("Segoe UI", 9), justify="left", anchor="w"
+        )
+        self.lbl_install_detail.pack(fill="x")
+
+    # ------------------- Страница 4: Завершение мастера -------------------
+    def _build_page_finish(self):
+        self.page_finish = tk.Frame(self.body_container, bg="#131615")
+
+        tk.Label(self.page_finish, text="✓ Установка успешно завершена!",
+                 bg="#131615", fg="#7ee2b8", font=("Segoe UI Semibold", 14), anchor="w").pack(fill="x", pady=(12, 6))
+
+        self.lbl_finish_desc = tk.Label(
+            self.page_finish, text="VoicePlayer готов к работе.\nВсе необходимые библиотеки и компоненты синтеза речи настроены.",
+            bg="#131615", fg="#cfd5d2", font=("Segoe UI", 9), justify="left", anchor="w"
+        )
+        self.lbl_finish_desc.pack(fill="x", pady=(0, 16))
+
+        card = tk.Frame(self.page_finish, bg="#181d1b", highlightthickness=1, highlightbackground="#262e2b",
+                        padx=16, pady=12)
+        card.pack(fill="x", pady=(0, 16))
+
+        self.lbl_finish_path = tk.Label(card, text="Папка программы: ...", bg="#181d1b", fg="#7c8782",
+                                        font=("Segoe UI", 9), anchor="w")
+        self.lbl_finish_path.pack(fill="x")
+
+        cb_launch = tk.Checkbutton(
+            self.page_finish, text="Запустить VoicePlayer сейчас", variable=self.var_launch_now,
+            bg="#131615", fg="#e8ecea", selectcolor="#1c211f", activebackground="#131615",
+            activeforeground="#7ee2b8", font=("Segoe UI Semibold", 10), cursor="hand2"
+        )
+        cb_launch.pack(anchor="w")
+
+    # ------------------- Управление страницами -------------------
+    def _show_page(self, index: int):
+        self.current_page = index
+        for p in (self.page_license, self.page_dest, self.page_tasks, self.page_install, self.page_finish):
+            p.pack_forget()
+
+        if index == 0:
+            self.lbl_head_title.configure(text="Лицензионное соглашение")
+            self.lbl_head_sub.configure(text="Пожалуйста, ознакомьтесь с условиями соглашения перед продолжением.")
+            self.page_license.pack(fill="both", expand=True)
+            self.btn_back.configure(state="disabled")
+            self.btn_next.configure(text="Далее >")
+            self._on_license_toggle()
+            self.btn_cancel.configure(state="normal")
+
+        elif index == 1:
+            self.lbl_head_title.configure(text="Выбор папки установки")
+            self.lbl_head_sub.configure(text="В какую папку вы хотите установить VoicePlayer?")
+            self.page_dest.pack(fill="both", expand=True)
+            self.btn_back.configure(state="normal")
+            self.btn_next.configure(state="normal", text="Далее >", bg="#7ee2b8", fg="#0d0f0e")
+            self._update_free_space()
+            self.btn_cancel.configure(state="normal")
+
+        elif index == 2:
+            self.lbl_head_title.configure(text="Выберите дополнительные задачи")
+            self.lbl_head_sub.configure(text="Какие ярлыки и параметры запуска должен настроить установщик?")
+            self.page_tasks.pack(fill="both", expand=True)
+            self.btn_back.configure(state="normal")
+            self.btn_next.configure(state="normal", text="Установить", bg="#7ee2b8", fg="#0d0f0e")
+            self.btn_cancel.configure(state="normal")
+
+        elif index == 3:
+            self.lbl_head_title.configure(text="Установка VoicePlayer")
+            self.lbl_head_sub.configure(text="Пожалуйста, подождите, пока идет процесс установки...")
+            self.page_install.pack(fill="both", expand=True)
+            self.btn_back.configure(state="disabled")
+            self.btn_next.configure(state="disabled")
+            self.btn_cancel.configure(state="disabled")
+            self._start_installation()
+
+        elif index == 4:
+            self.lbl_head_title.configure(text="Завершение мастера установки")
+            self.lbl_head_sub.configure(text="VoicePlayer успешно установлен на ваш компьютер.")
+            self.lbl_finish_path.configure(text=f"Папка программы: {self.var_dest.get()}")
+            self.page_finish.pack(fill="both", expand=True)
+            self.btn_back.pack_forget()
+            self.btn_cancel.pack_forget()
+            self.btn_next.configure(state="normal", text="Завершить", bg="#7ee2b8", fg="#0d0f0e")
+
+    def _go_next(self):
+        if self.current_page == 0:
+            if self.var_license.get() != "agree":
+                return
+            self._show_page(1)
+        elif self.current_page == 1:
+            dest = self.var_dest.get().strip()
+            if not dest:
+                messagebox.showwarning("Папка установки", "Пожалуйста, укажите папку для установки VoicePlayer.")
+                return
+            # Проверка доступности записи
+            try:
+                p = Path(dest)
+                p.mkdir(parents=True, exist_ok=True)
+                test_file = p / ".test_write.tmp"
+                test_file.write_text("ok", encoding="ascii")
+                test_file.unlink(missing_ok=True)
+            except Exception as e:
+                messagebox.showerror(
+                    "Ошибка доступа",
+                    f"Не удалось создать файлы в выбранной папке:\n{e}\n\n"
+                    "Пожалуйста, выберите другую папку (например, в вашей пользовательской директории)."
+                )
+                return
+            self._show_page(2)
+        elif self.current_page == 2:
+            self._show_page(3)
+        elif self.current_page == 4:
+            self._finish_and_launch()
+
+    def _go_back(self):
+        if self.current_page in (1, 2):
+            self._show_page(self.current_page - 1)
+
+    def _confirm_cancel(self):
+        if messagebox.askyesno("Выход из установки", "Прервать установку VoicePlayer?"):
+            self.root.destroy()
+
+    def _start_installation(self):
+        self.install_bar.start(12)
+        dest = Path(self.var_dest.get().strip())
+        desktop = self.var_desktop.get()
+        startmenu = self.var_startmenu.get()
+        autostart = self.var_autostart.get()
+
+        def set_status(msg: str):
+            self.root.after(0, lambda: self.lbl_install_step.configure(text=msg))
 
         def worker():
             try:
-                ver = run_install(set_status, start_app=True)
-                root.after(0, lambda: on_done(ver))
+                ver = run_install(
+                    dest_dir=dest,
+                    desktop_shortcut=desktop,
+                    start_menu_shortcut=startmenu,
+                    auto_start=autostart,
+                    status_cb=set_status,
+                    start_app=False
+                )
+                self._installed_ver = ver
+                self.root.after(0, self._on_install_done)
             except Exception as e:
-                root.after(0, lambda err=str(e): on_err(err))
+                self.root.after(0, lambda err=str(e): self._on_install_error(err))
 
         threading.Thread(target=worker, daemon=True).start()
 
-    def on_done(ver: str):
-        bar.stop()
-        lbl_status.configure(text=f"✓ VoicePlayer {ver} установлен и запущен!")
-        btn_install.configure(state="normal", text="Готово (Закрыть)", command=root.destroy)
-        root.after(1800, root.destroy)
+    def _on_install_done(self):
+        self.install_bar.stop()
+        self._show_page(4)
 
-    def on_err(err: str):
-        bar.stop()
-        lbl_status.configure(text="⚠ Ошибка установки", fg="#ff6b6b")
-        btn_install.configure(state="normal", text="Повторить")
-        messagebox.showerror("Установка VoicePlayer", err)
+    def _on_install_error(self, err: str):
+        self.install_bar.stop()
+        self.lbl_install_step.configure(text="⚠ Ошибка при установке", fg="#ff6b6b")
+        self.lbl_install_detail.configure(text=f"Произошла ошибка:\n{err}")
+        self.btn_back.configure(state="normal")
+        self.btn_cancel.configure(state="normal")
+        messagebox.showerror("Ошибка установки VoicePlayer", f"Не удалось завершить установку:\n{err}")
 
-    btn_install = tk.Button(
-        btn_row, text="Установить и запустить VoicePlayer", command=start_install,
-        bg="#7ee2b8", fg="#0d0f0e", activebackground="#6ad6a9", activeforeground="#0d0f0e",
-        font=("Segoe UI Semibold", 10), bd=0, padx=18, pady=8, cursor="hand2"
-    )
-    btn_install.pack(side="left")
+    def _finish_and_launch(self):
+        if self.var_launch_now.get():
+            dest = Path(self.var_dest.get().strip())
+            launch_cmd = dest / "launch.cmd"
+            launch_pyw = dest / "launch.pyw"
+            py = _find_system_python() or sys.executable
+            pyw = str(Path(py).with_name("pythonw.exe")) if Path(py).with_name("pythonw.exe").is_file() else py
+            try:
+                if launch_cmd.is_file():
+                    subprocess.Popen([str(launch_cmd)], creationflags=NO_WINDOW)
+                elif launch_pyw.is_file():
+                    subprocess.Popen([pyw, str(launch_pyw)], creationflags=NO_WINDOW)
+            except Exception:
+                pass
+        self.root.destroy()
 
-    tk.Button(
-        btn_row, text="Отмена", command=root.destroy,
-        bg="#1c211f", fg="#e8ecea", activebackground="#262e2b", activeforeground="#e8ecea",
-        font=("Segoe UI", 10), bd=0, padx=14, pady=8, cursor="hand2"
-    ).pack(side="right")
 
+def main():
+    args_upper = [a.upper() for a in sys.argv[1:]]
+    if "/SILENT" in args_upper or "/VERYSILENT" in args_upper:
+        default_folder = Path(os.environ.get("LOCALAPPDATA", Path.home())) / "Programs" / "VoicePlayer"
+        for a in sys.argv[1:]:
+            if a.upper().startswith("/DIR="):
+                default_folder = Path(a[5:].strip('"'))
+        run_install(
+            dest_dir=default_folder,
+            desktop_shortcut=True,
+            start_menu_shortcut=True,
+            auto_start=False,
+            status_cb=lambda _m: None,
+            start_app=True
+        )
+        return
+
+    root = tk.Tk()
+    ClassicInstallerWizard(root)
     root.mainloop()
 
 
