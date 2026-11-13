@@ -621,7 +621,7 @@ def create_shortcuts(desktop: bool = True, start_menu: bool = True, auto_start: 
             f"if ($d -and (Test-Path $d)) {{"
             f"$l = $s.CreateShortcut((Join-Path $d 'VoicePlayer.lnk'));"
             f"$l.TargetPath = '{py_bin}';"
-            f"$l.Arguments = '`\"{py_launcher}`\"';"
+            f"$l.Arguments = '\"{py_launcher}\"';"
             f"$l.WorkingDirectory = '{str(h)}';"
             f"$l.WindowStyle = 1;"
             f"$l.IconLocation = '{ico_path},0';"
