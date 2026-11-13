@@ -1,16 +1,5 @@
-﻿<#
-.SYNOPSIS
-    VoicePlayer One-Click Windows Installer (Zero-SmartScreen / Mark-of-the-Web bypass)
-.DESCRIPTION
-    Устанавливает актуальную версию VoicePlayer на Windows в один клик:
-    - Обходит фильтр SmartScreen (файлы разблокируются через Unblock-File)
-    - Проверяет и при необходимости автоматически ставит официальный Python 3.12
-    - Распаковывает VoicePlayer в $env:LOCALAPPDATA\Programs\VoicePlayer
-    - Создаёт ярлыки на Рабочем столе и в меню «Пуск»
-    - Регистрирует приложение в «Параметры → Установленные приложения»
-.EXAMPLE
-    powershell -Command "irm https://raw.githubusercontent.com/infostroper-cloud/voice-player/main/install.ps1 | iex"
-#>
+# VoicePlayer Windows Installer (One-Click / Zero-SmartScreen)
+# https://github.com/infostroper-cloud/voice-player
 
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 $ErrorActionPreference = "Stop"
