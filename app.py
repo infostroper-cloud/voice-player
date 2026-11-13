@@ -7908,7 +7908,7 @@ class VoicePlayerApp:
         self._support_win = w
         w.title(vp_i18n.t("about_win_title"))
         w.configure(bg=cc["panel"])
-        self._center_over_root(w, 560, 420)
+        self._center_over_root(w, 590, 440)
         w.transient(self.root)
 
         box = ttk.Frame(w, padding=18)
@@ -7929,20 +7929,18 @@ class VoicePlayerApp:
         ttk.Label(box, text=desc, style="TLabel", wraplength=510, justify="left").grid(
             row=2, column=0, sticky="w", pady=(0, 12))
 
-        donate_url = os.environ.get("VP_DONATE_URL", "https://t.me/tribute/app?startapp=dTZW")
+        lemon_url = os.environ.get("VP_LEMON_URL", "https://voiceplayer.lemonsqueezy.com/checkout/buy/85e498e2-850e-498e-b794-568ff81d5ad0")
         boosty_url = "https://boosty.to/tikoulf/posts/2b4dd6a8-157f-4202-b8db-b4e019ae8a02"
-        pro_key_url = "https://web.tribute.tg/p/K1s"
+        donate_url = os.environ.get("VP_DONATE_URL", "https://t.me/tribute/app?startapp=dTZW")
         tg_channel_url = "https://t.me/voiceplayer_ai"
         btn_row = ttk.Frame(box)
         btn_row.grid(row=3, column=0, sticky="ew", pady=(0, 14))
-        ttk.Button(btn_row, text="♥  " + vp_i18n.t("donate_tg"), style="Primary.TButton",
-                   command=lambda: webbrowser.open(donate_url)).pack(side="left", padx=(0, 6))
+        ttk.Button(btn_row, text="🍋  " + vp_i18n.t("buy_pro_lemon"), style="Primary.TButton",
+                   command=lambda: webbrowser.open(lemon_url)).pack(side="left", padx=(0, 6))
         ttk.Button(btn_row, text="🧡  Boosty (★ Pro)", style="Toggle.TButton",
                    command=lambda: webbrowser.open(boosty_url)).pack(side="left", padx=(0, 6))
-        ttk.Button(btn_row, text="★  " + vp_i18n.t("pro_key"), style="Toggle.TButton",
-                   command=lambda: webbrowser.open(pro_key_url)).pack(side="left", padx=(0, 6))
-        ttk.Button(btn_row, text="✈️ " + vp_i18n.t("channel"), style="Toggle.TButton",
-                   command=lambda: webbrowser.open(tg_channel_url)).pack(side="left", padx=(0, 6))
+        ttk.Button(btn_row, text="♥  " + vp_i18n.t("donate_tg"), style="Toggle.TButton",
+                   command=lambda: webbrowser.open(donate_url)).pack(side="left", padx=(0, 6))
         ttk.Button(btn_row, text=vp_i18n.t("later"), style="Toggle.TButton",
                    command=w.destroy).pack(side="left")
 
