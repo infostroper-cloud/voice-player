@@ -424,6 +424,13 @@ def install_launcher() -> Path:
     py.write_text(LAUNCHER, encoding="utf-8")
     if os.name == "nt":
         (home_dir() / "launch.cmd").write_text(f'@start "" "{gui_python()}" "%~dp0launch.pyw" %*\r\n', encoding="ascii")
+        legacy = Path.home() / ".voice-player"
+        if legacy.exists() and legacy != home_dir():
+            try:
+                (legacy / "launch.pyw").write_text(LAUNCHER, encoding="utf-8")
+                (legacy / "launch.cmd").write_text(f'@start "" "{gui_python()}" "%~dp0launch.pyw" %*\r\n', encoding="ascii")
+            except Exception:
+                pass
     else:
         sh = home_dir() / "launch.sh"
         sh.write_text(f'#!/usr/bin/env bash\nexec "{gui_python()}" "{py}" "$@"\n', encoding="utf-8")
@@ -626,6 +633,21 @@ def create_shortcuts(desktop: bool = True, start_menu: bool = True, auto_start: 
             f"$l.WindowStyle = 1;"
             f"$l.IconLocation = '{ico_path},0';"
             f"$l.Save() }}}}"
+            f"$pinDirs = @("
+            f"\"$env:APPDATA\\Microsoft\\Internet Explorer\\Quick Launch\\User Pinned\\TaskBar\","
+            f"\"$env:APPDATA\\Microsoft\\Internet Explorer\\Quick Launch\\User Pinned\\ImplicitAppShortcuts\""
+            f");"
+            f"foreach ($pd in $pinDirs) {{"
+            f"if (Test-Path $pd) {{"
+            f"Get-ChildItem -Path $pd -Filter '*VoicePlayer*.lnk' -Recurse -ErrorAction SilentlyContinue | ForEach-Object {{"
+            f"$pl = $s.CreateShortcut($_.FullName);"
+            f"$pl.TargetPath = '{py_bin}';"
+            f"$pl.Arguments = '\"{py_launcher}\"';"
+            f"$pl.WorkingDirectory = '{str(h)}';"
+            f"$pl.WindowStyle = 1;"
+            f"$pl.IconLocation = '{ico_path},0';"
+            f"$pl.Save() }}}}"
+            f"}}"
         )
         try:
             subprocess.run(["powershell", "-NoProfile", "-Command", script], check=True, timeout=60, creationflags=NO_WINDOW)
