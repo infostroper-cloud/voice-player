@@ -7617,7 +7617,7 @@ class VoicePlayerApp:
                         self.var_source_label.set(self._src_labels["all"])
                     self._set_status(f"{tool['label']}: подключён и отслеживается", ok=True)
             except Exception as e:
-                messagebox.showerror(APP_NAME, f"Не удалось изменить настройки {tool['label']}:\n{e}")
+                messagebox.showerror(APP_NAME, f"Не удалось изменить настройки {tool['label']}:\n{e}", parent=tab)
             self._build_ai_tab(tab)
             self._refresh_ai_badge()
 
@@ -8499,9 +8499,14 @@ def main():
         seed = sys.argv[idx + 1] if idx + 1 < len(sys.argv) else ""
         print(generate_supporter_key(seed))
         sys.exit(0)
-    if len(sys.argv) > 2 and sys.argv[1] == "--feed":   # собранный .exe работает и как хук нейросетей
-        sys.path.insert(0, str(APP_DIR / "hooks"))
-        import vp_feed
+    if len(sys.argv) > 2 and sys.argv[1] == "--feed":   # собранный .exe/.app работает и как хук нейросетей
+        try:
+            import vp_feed
+        except ImportError:
+            for p in (APP_DIR / "hooks", Path.home() / ".voice-player" / "hooks"):
+                if p.exists() and str(p) not in sys.path:
+                    sys.path.insert(0, str(p))
+            import vp_feed
         sys.exit(vp_feed.main(sys.argv[1:]))
     if _activate_running_instance() or not _claim_single_instance():
         return

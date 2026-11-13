@@ -15,9 +15,12 @@ APP  = os.path.join(ROOT, "app.py")
 ICON = os.path.join(ROOT, "icon.ico")
 FULL = os.environ.get("VP_FULL") == "1"
 
-datas, binaries, hiddenimports = [], [], ["edge_tts", "aiohttp", "certifi"]
+datas, binaries, hiddenimports = [], [], ["edge_tts", "aiohttp", "certifi", "vp_feed"]
 if os.path.exists(ICON):
     datas.append((ICON, "."))
+HOOKS_DIR = os.path.join(ROOT, "hooks")
+if os.path.exists(HOOKS_DIR):
+    datas.append((HOOKS_DIR, "hooks"))
 
 # пакеты с бинарниками/данными, которые PyInstaller не находит сам
 core_pkgs = ["edge_tts", "sounddevice", "miniaudio", "audiotsm", "certifi", "aiohttp"]

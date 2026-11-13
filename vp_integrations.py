@@ -11,7 +11,7 @@ import sys
 import time
 from pathlib import Path
 
-FEED_MARKERS = ("vp_feed", "speak-response")
+FEED_MARKERS = ("vp_feed", "speak-response", "--feed", "voiceplayer", "voice-player")
 
 
 def _feed_command(tool: str, app_dir: Path) -> str:
@@ -20,7 +20,12 @@ def _feed_command(tool: str, app_dir: Path) -> str:
     py = Path(sys.executable)
     if py.name.lower() == "pythonw.exe":     # у pythonw нет вывода, а хукам нужен ответ в stdout
         py = py.with_name("python.exe")
-    return f'"{py}" "{app_dir / "hooks" / "vp_feed.py"}" {tool}'
+    feed_script = app_dir / "hooks" / "vp_feed.py"
+    if not feed_script.exists():
+        fallback = Path.home() / ".voice-player" / "hooks" / "vp_feed.py"
+        if fallback.exists():
+            feed_script = fallback
+    return f'"{py}" "{feed_script}" {tool}'
 
 
 def _claude_entry(command: str) -> dict:
@@ -76,7 +81,8 @@ def _write_config(path: Path, data: dict) -> None:
 
 
 def _has_marker(entry) -> bool:
-    return any(m in json.dumps(entry, ensure_ascii=False) for m in FEED_MARKERS)
+    dumped = json.dumps(entry, ensure_ascii=False).lower()
+    return any(m.lower() in dumped for m in FEED_MARKERS)
 
 
 def is_connected(tool_id: str, home: Path = None) -> bool:
@@ -120,15 +126,19 @@ def connect(tool_id: str, app_dir: Path, home: Path = None) -> None:
         block = cfg.setdefault(named, {})
         block.pop("enabled", None)
         entries = block.setdefault(tool["event"], [])
+        cleaned = [e for e in entries if not _has_marker(e)]
+        cleaned.append(tool["entry"](_feed_command(tool_id, app_dir)))
+        block[tool["event"]] = cleaned
     else:
         hooks = cfg.setdefault("hooks", {})
         if tool_id == "cursor":
             cfg.setdefault("version", 1)
         entries = hooks.setdefault(tool["event"], [])
-    if not any(_has_marker(e) for e in entries):
-        entries.append(tool["entry"](_feed_command(tool_id, app_dir)))
-        path.parent.mkdir(parents=True, exist_ok=True)
-        _write_config(path, cfg)
+        cleaned = [e for e in entries if not _has_marker(e)]
+        cleaned.append(tool["entry"](_feed_command(tool_id, app_dir)))
+        hooks[tool["event"]] = cleaned
+    path.parent.mkdir(parents=True, exist_ok=True)
+    _write_config(path, cfg)
 
 
 def disconnect(tool_id: str, home: Path = None) -> None:

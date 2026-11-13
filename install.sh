@@ -148,6 +148,12 @@ if [ ! -f "$TARGET_DIR/app.py" ]; then
     exit 1
 fi
 
+# Ensure persistent hooks directory
+if [ -d "$TARGET_DIR/hooks" ]; then
+    mkdir -p "$INSTALL_DIR/hooks"
+    cp -r "$TARGET_DIR/hooks"/* "$INSTALL_DIR/hooks/" 2>/dev/null || true
+fi
+
 # Create stable pointer
 mkdir -p "$INSTALL_DIR"
 cat << EOF > "$INSTALL_DIR/current-version.json"

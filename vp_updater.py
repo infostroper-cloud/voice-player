@@ -369,7 +369,12 @@ def stable_hook_home(app_dir: Path) -> Path:
     """Хуки нейросетей должны пережить обновление: их скрипт лежит вне папок версий."""
     target = home_dir() / "hooks"
     target.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(Path(app_dir) / "hooks" / "vp_feed.py", target / "vp_feed.py")
+    src_feed = Path(app_dir) / "hooks" / "vp_feed.py"
+    if src_feed.exists():
+        try:
+            shutil.copy2(src_feed, target / "vp_feed.py")
+        except OSError:
+            pass
     return home_dir()
 
 
