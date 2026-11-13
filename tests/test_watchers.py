@@ -220,6 +220,50 @@ class CodexAndAntigravityWatchers(unittest.TestCase):
         self.assertIn("Также можно использовать PyPy", items[0]["text"])
         self.assertEqual(items[0]["prompt"], "А ещё варианты?")
 
+    def test_deepseek_zstd_watcher(self):
+        try:
+            import zstandard as zstd
+        except ImportError:
+            self.skipTest("zstandard not installed")
+
+        zstd_dir = self.home / ".dsh" / "sessions" / "test-ws" / "session-live-uuid"
+        zstd_dir.mkdir(parents=True)
+        zstd_file = zstd_dir / "session.v4.jsonl.zstd"
+
+        def _write_zstd_events(events):
+            dctx = zstd.ZstdCompressor()
+            raw = "\n".join(json.dumps(ev, ensure_ascii=False) for ev in events).encode("utf-8")
+            zstd_file.write_bytes(dctx.compress(raw))
+
+        events = [
+            {"type": "session/title", "data": {"title": "Тестовая сессия"}},
+            {"type": "user/message", "data": {"content": [{"type": "text", "text": "Как дела?"}]}},
+            {"type": "assistant/message", "seq": 10, "data": {"turn": 1, "message": {"content": [{"type": "text", "text": "Всё отлично!"}]}}},
+            {"type": "turn/end", "seq": 11, "data": {"turn": 1}}
+        ]
+        _write_zstd_events(events)
+
+        watcher = vw.DeepSeekWatcher(home=self.home)
+        self.assertTrue(watcher.available())
+        # Первый запуск запоминает историю
+        watcher.poll()
+
+        # Добавляем второй завершённый ход из двух частей
+        events.extend([
+            {"type": "user/message", "data": {"content": [{"type": "text", "text": "Расскажи подробнее"}]}},
+            {"type": "assistant/message", "seq": 20, "data": {"turn": 2, "message": {"content": [{"type": "text", "text": "Часть 1: анализ."}]}}},
+            {"type": "assistant/message", "seq": 21, "data": {"turn": 2, "message": {"content": [{"type": "text", "text": "Часть 2: выводы."}]}}},
+            {"type": "turn/end", "seq": 22, "data": {"turn": 2}}
+        ])
+        _write_zstd_events(events)
+
+        items = watcher.poll()
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]["source"], "deepseek")
+        self.assertEqual(items[0]["prompt"], "Расскажи подробнее")
+        self.assertIn("Часть 1: анализ.", items[0]["text"])
+        self.assertIn("Часть 2: выводы.", items[0]["text"])
+
     def test_kimi_watcher(self):
         wire_dir = self.home / ".kimi-desktop" / "daimon-share" / "daimon" / "runtime" / "kimi-code" / "home" / "sessions" / "s1" / "c1" / "agents" / "main"
         wire_dir.mkdir(parents=True)

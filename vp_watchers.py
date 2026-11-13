@@ -853,6 +853,7 @@ class DeepSeekWatcher:
         self.home = Path(home or Path.home())
         self.state = state if state is not None else {}
         self.dsh_dir = self._find_dsh_dir()
+        self._cache: dict = {}
 
     def _find_dsh_dir(self) -> Path:
         candidates = [
@@ -862,43 +863,56 @@ class DeepSeekWatcher:
             self.home / ".config" / "deepseek" / ".dsh",
             self.home / ".config" / "deepseek",
         ]
-        return next((p for p in candidates if (p / "storages" / "session_projcache" / "sessions").is_dir()), self.home / ".dsh")
+        return next((p for p in candidates if (p / "sessions").is_dir() or (p / "storages" / "session_projcache" / "sessions").is_dir()), self.home / ".dsh")
 
     def available(self) -> bool:
-        return (self.dsh_dir / "storages" / "session_projcache" / "sessions").is_dir()
+        return (self.dsh_dir / "sessions").is_dir() or (self.dsh_dir / "storages" / "session_projcache" / "sessions").is_dir()
 
-    def _get_recent_session_files(self) -> list:
-        sess_dir = self.dsh_dir / "storages" / "session_projcache" / "sessions"
-        if not sess_dir.is_dir():
+    def _get_zstd_files(self, limit: int = 8) -> list[Path]:
+        s_dir = self.dsh_dir / "sessions"
+        if not s_dir.is_dir():
             return []
-        files = list(sess_dir.glob("session-*.json"))
+        files = list(s_dir.glob("*/*/session.v4.jsonl.zstd"))
         files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
-        return files[:8]
+        return files[:limit]
 
-    def _read_full_turns_from_zstd(self, sess_id: str) -> dict:
-        """Считывает полные (необрезанные) тексты ходов из session.v4.jsonl.zstd."""
-        out = {}
+    def _parse_zstd_session(self, zpath: Path) -> tuple[dict, str]:
+        try:
+            mtime = zpath.stat().st_mtime
+            size = zpath.stat().st_size
+        except OSError:
+            return {}, ""
+
+        cached = self._cache.get(str(zpath))
+        if cached and cached[0] == mtime and cached[1] == size:
+            return cached[2], cached[3]
+
         try:
             import zstandard as zstd
         except ImportError:
-            return out
+            return {}, ""
 
-        zstd_candidates = list(self.dsh_dir.glob(f"sessions/*/session-{sess_id}/session.v4.jsonl.zstd"))
-        if not zstd_candidates:
-            return out
-        zpath = zstd_candidates[0]
+        turns: dict = {}
+        last_prompt = ""
+        title = ""
+
         try:
             dctx = zstd.ZstdDecompressor()
             with open(zpath, "rb") as fh:
                 with dctx.stream_reader(fh) as reader:
                     lines = reader.read().decode("utf-8", errors="ignore").splitlines()
-            last_prompt = ""
+
             for line in lines:
                 try:
                     ev = json.loads(line)
-                    t = ev.get("type", "")
+                    t = ev.get("type")
                     data = ev.get("data", {})
-                    if t == "user/message":
+                    seq = ev.get("seq", 0)
+                    time_ms = ev.get("time", 0)
+
+                    if t == "session/title":
+                        title = data.get("title", "")
+                    elif t == "user/message":
                         content = data.get("content", [])
                         txt = "".join(c.get("text", "") for c in content if isinstance(c, dict) and c.get("type") == "text").strip()
                         txt = re.sub(r"^Time sampled while preparing turn[^\n]*\n+", "", txt).strip()
@@ -906,24 +920,48 @@ class DeepSeekWatcher:
                         if txt and not txt.startswith("Elapsed since the preceding"):
                             last_prompt = txt
                     elif t == "assistant/message":
+                        turn_idx = data.get("turn")
+                        if turn_idx is None:
+                            continue
                         msg = data.get("message", {})
                         content = msg.get("content", [])
-                        text_parts = [c.get("text", "") for c in content if isinstance(c, dict) and c.get("type") == "text"]
-                        full_text = "\n\n".join(tp.strip() for tp in text_parts if tp.strip())
+                        text_parts = [c.get("text", "") for c in content if isinstance(c, dict) and c.get("type") == "text" and c.get("text", "").strip()]
+                        if text_parts:
+                            full_text = "\n\n".join(text_parts).strip()
+                            if turn_idx not in turns:
+                                turns[turn_idx] = {
+                                    "turn": turn_idx,
+                                    "prompt": last_prompt,
+                                    "text_parts": [],
+                                    "last_seq": seq,
+                                    "time": time_ms,
+                                    "completed": False,
+                                }
+                            turns[turn_idx]["text_parts"].append(full_text)
+                            turns[turn_idx]["last_seq"] = seq
+                            turns[turn_idx]["time"] = time_ms
+                            if not turns[turn_idx]["prompt"] and last_prompt:
+                                turns[turn_idx]["prompt"] = last_prompt
+                    elif t == "turn/end":
                         turn_idx = data.get("turn")
-                        seq = ev.get("seq", 0)
-                        if full_text and turn_idx is not None:
-                            out[turn_idx] = {
-                                "text": full_text,
-                                "prompt": last_prompt,
-                                "seq": seq,
-                                "time": ev.get("time"),
-                            }
+                        if turn_idx in turns:
+                            turns[turn_idx]["completed"] = True
+                            turns[turn_idx]["last_seq"] = seq
                 except Exception:
                     continue
         except Exception:
             pass
-        return out
+
+        self._cache[str(zpath)] = (mtime, size, turns, title)
+        return turns, title
+
+    def _get_recent_json_files(self) -> list[Path]:
+        sess_dir = self.dsh_dir / "storages" / "session_projcache" / "sessions"
+        if not sess_dir.is_dir():
+            return []
+        files = list(sess_dir.glob("*.json"))
+        files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+        return files[:8]
 
     def poll(self, now: Optional[float] = None) -> list:
         now = time.time() if now is None else now
@@ -934,80 +972,79 @@ class DeepSeekWatcher:
         first_run = not self.state.get("init")
         out = []
 
-        for fpath in self._get_recent_session_files():
-            try:
-                with open(fpath, "r", encoding="utf-8", errors="ignore") as f:
-                    data = json.load(f)
-                rows = data.get("record", {}).get("rows", {})
-                turns = rows.get("turnOutline", {}).get("val", {}).get("turns", [])
-                title = rows.get("title", {}).get("val", "") or rows.get("goal", {}).get("val", {}).get("current", {}).get("goal", {}).get("objective", "")
-                sess_id = fpath.stem.replace("session-", "")
-                full_turns = self._read_full_turns_from_zstd(sess_id)
+        # 1. Основной путь: чтение потоковых .zstd логов
+        zstds = self._get_zstd_files(limit=8)
+        if zstds:
+            for zpath in zstds:
+                sess_id = zpath.parent.name.replace("session-", "")
+                turns, title = self._parse_zstd_session(zpath)
+                max_turn = max(turns.keys()) if turns else 0
+                for tnum in sorted(turns.keys()):
+                    t = turns[tnum]
+                    # Если ход ещё не завершён и файл обновлялся в последние 3 сек — ждём финала
+                    if not t.get("completed") and tnum == max_turn:
+                        try:
+                            if (now - zpath.stat().st_mtime) < 3.0:
+                                continue
+                        except OSError:
+                            continue
 
-                for t in turns:
-                    turn_num = t.get("turn") or t.get("turnId") or t.get("id") or 0
-                    seq = t.get("seq") or t.get("timestamp") or 0
-                    key = f"dsh:{sess_id}:{turn_num}:{seq}"
+                    key = f"dsh:{sess_id}:{tnum}"
                     if key in seen:
                         continue
+
+                    parts = t.get("text_parts", [])
+                    resp = "\n\n".join(parts).strip()
+                    if not resp:
+                        if t.get("completed"):
+                            seen.add(key)
+                        continue
+
                     seen.add(key)
                     if first_run:
                         continue
+
                     prompt = (t.get("prompt") or "").strip()
-                    resp = (t.get("response") or "").strip()
-                    if turn_num in full_turns:
-                        full_resp = full_turns[turn_num].get("text", "").strip()
-                        if full_resp:
-                            resp = full_resp
-                        if not prompt:
-                            prompt = full_turns[turn_num].get("prompt", "").strip()
-                    if not resp:
-                        continue
-                    mtime = fpath.stat().st_mtime
+                    when = (t["time"] / 1000.0) if t.get("time") else zpath.stat().st_mtime
                     out.append({
                         "source": "deepseek",
                         "author": "DeepSeek Harness",
                         "session": sess_id,
                         "title": _short(title or prompt or "DeepSeek"),
                         "prompt": prompt[:300],
-                        "time": time.strftime("%H:%M", time.localtime(mtime)),
-                        "date": time.strftime("%d.%m.%Y", time.localtime(mtime)),
+                        "time": time.strftime("%H:%M", time.localtime(when)),
+                        "date": time.strftime("%d.%m.%Y", time.localtime(when)),
                         "text": resp,
                         "key": key,
                     })
-            except Exception:
-                continue
 
-        self.state["seen"] = list(seen)[-500:]
-        self.state["init"] = True
-        return out
+        # 2. Резервный путь (если нет zstd или zstandard не установлен): чтение JSON-кэша
+        else:
+            for fpath in self._get_recent_json_files():
+                try:
+                    with open(fpath, "r", encoding="utf-8", errors="ignore") as f:
+                        data = json.load(f)
+                    rows = data.get("record", {}).get("rows", {})
+                    turns = rows.get("turnOutline", {}).get("val", {}).get("turns", [])
+                    title = rows.get("title", {}).get("val", "") or rows.get("goal", {}).get("current", {}).get("goal", {}).get("objective", "")
+                    sess_id = fpath.stem.replace("session-", "")
 
-    def fetch_recent(self, limit: int = 5) -> list:
-        if not self.available():
-            return []
-        out = []
-        for fpath in self._get_recent_session_files():
-            try:
-                with open(fpath, "r", encoding="utf-8", errors="ignore") as f:
-                    data = json.load(f)
-                rows = data.get("record", {}).get("rows", {})
-                turns = rows.get("turnOutline", {}).get("val", {}).get("turns", [])
-                title = rows.get("title", {}).get("val", "") or rows.get("goal", {}).get("val", {}).get("current", {}).get("goal", {}).get("objective", "")
-                sess_id = fpath.stem.replace("session-", "")
-                mtime = fpath.stat().st_mtime
-                full_turns = self._read_full_turns_from_zstd(sess_id)
+                    for t in turns:
+                        turn_num = t.get("turn") or t.get("turnId") or t.get("id") or 0
+                        key = f"dsh:{sess_id}:{turn_num}"
+                        if key in seen:
+                            continue
 
-                for t in reversed(turns):
-                    resp = (t.get("response") or "").strip()
-                    prompt = (t.get("prompt") or "").strip()
-                    turn_num = t.get("turn") or t.get("turnId") or t.get("id") or 0
-                    if turn_num in full_turns:
-                        full_resp = full_turns[turn_num].get("text", "").strip()
-                        if full_resp:
-                            resp = full_resp
-                        if not prompt:
-                            prompt = full_turns[turn_num].get("prompt", "").strip()
-                    if resp:
+                        resp = (t.get("response") or "").strip()
+                        if not resp:
+                            continue
+
+                        seen.add(key)
+                        if first_run:
+                            continue
+
+                        prompt = (t.get("prompt") or "").strip()
+                        mtime = fpath.stat().st_mtime
                         out.append({
                             "source": "deepseek",
                             "author": "DeepSeek Harness",
@@ -1017,12 +1054,75 @@ class DeepSeekWatcher:
                             "time": time.strftime("%H:%M", time.localtime(mtime)),
                             "date": time.strftime("%d.%m.%Y", time.localtime(mtime)),
                             "text": resp,
-                            "key": f"dsh:{sess_id}:{turn_num}:{t.get('seq', 0)}",
+                            "key": key,
                         })
-                        if len(out) >= limit:
-                            return out
-            except Exception:
-                continue
+                except Exception:
+                    continue
+
+        self.state["seen"] = list(seen)[-1000:]
+        self.state["init"] = True
+        return out
+
+    def fetch_recent(self, limit: int = 5) -> list:
+        if not self.available():
+            return []
+        out = []
+        zstds = self._get_zstd_files(limit=5)
+        if zstds:
+            for zpath in zstds:
+                sess_id = zpath.parent.name.replace("session-", "")
+                turns, title = self._parse_zstd_session(zpath)
+                for tnum in sorted(turns.keys(), reverse=True):
+                    t = turns[tnum]
+                    resp = "\n\n".join(t.get("text_parts", [])).strip()
+                    if not resp:
+                        continue
+                    prompt = (t.get("prompt") or "").strip()
+                    when = (t["time"] / 1000.0) if t.get("time") else zpath.stat().st_mtime
+                    out.append({
+                        "source": "deepseek",
+                        "author": "DeepSeek Harness",
+                        "session": sess_id,
+                        "title": _short(title or prompt or "DeepSeek"),
+                        "prompt": prompt[:300],
+                        "time": time.strftime("%H:%M", time.localtime(when)),
+                        "date": time.strftime("%d.%m.%Y", time.localtime(when)),
+                        "text": resp,
+                        "key": f"dsh:{sess_id}:{tnum}",
+                    })
+                    if len(out) >= limit:
+                        return out
+        else:
+            for fpath in self._get_recent_json_files():
+                try:
+                    with open(fpath, "r", encoding="utf-8", errors="ignore") as f:
+                        data = json.load(f)
+                    rows = data.get("record", {}).get("rows", {})
+                    turns = rows.get("turnOutline", {}).get("val", {}).get("turns", [])
+                    title = rows.get("title", {}).get("val", "") or rows.get("goal", {}).get("current", {}).get("goal", {}).get("objective", "")
+                    sess_id = fpath.stem.replace("session-", "")
+                    mtime = fpath.stat().st_mtime
+
+                    for t in reversed(turns):
+                        resp = (t.get("response") or "").strip()
+                        prompt = (t.get("prompt") or "").strip()
+                        turn_num = t.get("turn") or t.get("turnId") or t.get("id") or 0
+                        if resp:
+                            out.append({
+                                "source": "deepseek",
+                                "author": "DeepSeek Harness",
+                                "session": sess_id,
+                                "title": _short(title or prompt or "DeepSeek"),
+                                "prompt": prompt[:300],
+                                "time": time.strftime("%H:%M", time.localtime(mtime)),
+                                "date": time.strftime("%d.%m.%Y", time.localtime(mtime)),
+                                "text": resp,
+                                "key": f"dsh:{sess_id}:{turn_num}",
+                            })
+                            if len(out) >= limit:
+                                return out
+                except Exception:
+                    continue
         return out
 
 
