@@ -709,11 +709,12 @@ class OllamaWatcher:
 
     def _find_db(self) -> Optional[Path]:
         candidates = [
-            Path(os.environ.get("LOCALAPPDATA", "")) / "Ollama" / "db.sqlite",
+            self.home / "AppData" / "Local" / "Ollama" / "db.sqlite",
             self.home / ".ollama" / "db.sqlite",
+            Path(os.environ.get("LOCALAPPDATA", "")) / "Ollama" / "db.sqlite",
             Path(os.environ.get("APPDATA", "")) / "Ollama" / "db.sqlite",
         ]
-        return next((p for p in candidates if p.is_file()), None)
+        return next((p for p in candidates if p and p.is_file()), None)
 
     def available(self) -> bool:
         db = self._find_db()
@@ -730,10 +731,13 @@ class OllamaWatcher:
         if not self.state.get("init"):
             try:
                 con = _ro(db)
-                cur = con.cursor()
-                cur.execute("SELECT max(id) FROM messages")
-                row = cur.fetchone()
-                self.state["last_id"] = int(row[0] or 0)
+                try:
+                    cur = con.cursor()
+                    cur.execute("SELECT max(id) FROM messages")
+                    row = cur.fetchone()
+                    self.state["last_id"] = int(row[0] or 0)
+                finally:
+                    con.close()
                 self.state["init"] = True
                 return []
             except Exception:
@@ -743,46 +747,49 @@ class OllamaWatcher:
         out = []
         try:
             con = _ro(db)
-            cur = con.cursor()
-            cur.execute(
-                "SELECT id, chat_id, role, content, model_name, created_at, stream "
-                "FROM messages "
-                "WHERE id > ? AND role = 'assistant' AND (stream = 0 OR stream IS NULL) AND length(content) > 0 "
-                "ORDER BY id ASC",
-                (last_id,)
-            )
-            rows = cur.fetchall()
-            for msg_id, chat_id, role, content, model_name, created_at, stream in rows:
-                last_id = max(last_id, msg_id)
-                p_cur = con.cursor()
-                p_cur.execute(
-                    "SELECT content FROM messages WHERE chat_id = ? AND role = 'user' AND id < ? ORDER BY id DESC LIMIT 1",
-                    (chat_id, msg_id)
+            try:
+                cur = con.cursor()
+                cur.execute(
+                    "SELECT id, chat_id, role, content, model_name, created_at, stream "
+                    "FROM messages "
+                    "WHERE id > ? AND role = 'assistant' AND (stream = 0 OR stream IS NULL) AND length(content) > 0 "
+                    "ORDER BY id ASC",
+                    (last_id,)
                 )
-                p_row = p_cur.fetchone()
-                prompt = (p_row[0] or "").strip() if p_row else ""
+                rows = cur.fetchall()
+                for msg_id, chat_id, role, content, model_name, created_at, stream in rows:
+                    last_id = max(last_id, msg_id)
+                    p_cur = con.cursor()
+                    p_cur.execute(
+                        "SELECT content FROM messages WHERE chat_id = ? AND role = 'user' AND id < ? ORDER BY id DESC LIMIT 1",
+                        (chat_id, msg_id)
+                    )
+                    p_row = p_cur.fetchone()
+                    prompt = (p_row[0] or "").strip() if p_row else ""
 
-                c_cur = con.cursor()
-                c_cur.execute("SELECT title FROM chats WHERE id = ?", (chat_id,))
-                c_row = c_cur.fetchone()
-                title = (c_row[0] or "").strip() if c_row else ""
+                    c_cur = con.cursor()
+                    c_cur.execute("SELECT title FROM chats WHERE id = ?", (chat_id,))
+                    c_row = c_cur.fetchone()
+                    title = (c_row[0] or "").strip() if c_row else ""
 
-                raw_mod = (model_name or "local").split("/")[-1].split(":")[0]
-                model_label = raw_mod.replace("-GGUF", "").replace("-abliterated", "")
+                    raw_mod = (model_name or "local").split("/")[-1].split(":")[0]
+                    model_label = raw_mod.replace("-GGUF", "").replace("-abliterated", "")
 
-                when = _iso_ts(created_at) or now
-                out.append({
-                    "source": "ollama",
-                    "author": f"Ollama · {model_label}",
-                    "session": chat_id,
-                    "title": title or _short(prompt) or "Ollama",
-                    "prompt": prompt[:300],
-                    "time": time.strftime("%H:%M", time.localtime(when)),
-                    "date": time.strftime("%d.%m.%Y", time.localtime(when)),
-                    "text": content,
-                    "key": f"ollama:{chat_id}:{msg_id}",
-                })
-            self.state["last_id"] = last_id
+                    when = _iso_ts(created_at) or now
+                    out.append({
+                        "source": "ollama",
+                        "author": f"Ollama · {model_label}",
+                        "session": chat_id,
+                        "title": title or _short(prompt) or "Ollama",
+                        "prompt": prompt[:300],
+                        "time": time.strftime("%H:%M", time.localtime(when)),
+                        "date": time.strftime("%d.%m.%Y", time.localtime(when)),
+                        "text": content,
+                        "key": f"ollama:{chat_id}:{msg_id}",
+                    })
+                self.state["last_id"] = last_id
+            finally:
+                con.close()
         except Exception:
             pass
         return out
@@ -872,8 +879,8 @@ class DeepSeekWatcher:
                 sess_id = fpath.stem.replace("session-", "")
 
                 for t in turns:
-                    turn_num = t.get("turn", 0)
-                    seq = t.get("seq", 0)
+                    turn_num = t.get("turn") or t.get("turnId") or t.get("id") or 0
+                    seq = t.get("seq") or t.get("timestamp") or 0
                     key = f"dsh:{sess_id}:{turn_num}:{seq}"
                     if key in seen:
                         continue
@@ -946,15 +953,23 @@ class KimiWatcher:
     def __init__(self, home: Optional[Path] = None, state: Optional[dict] = None):
         self.home = Path(home or Path.home())
         self.state = state if state is not None else {}
-        self.base_dir = Path(os.environ.get("APPDATA", "")) / "kimi-desktop" / "daimon-share" / "daimon" / "runtime" / "kimi-code" / "home" / "sessions"
+
+    def _get_base_dir(self) -> Optional[Path]:
+        candidates = [
+            self.home / "AppData" / "Roaming" / "kimi-desktop" / "daimon-share" / "daimon" / "runtime" / "kimi-code" / "home" / "sessions",
+            self.home / ".kimi-desktop" / "daimon-share" / "daimon" / "runtime" / "kimi-code" / "home" / "sessions",
+            Path(os.environ.get("APPDATA", "")) / "kimi-desktop" / "daimon-share" / "daimon" / "runtime" / "kimi-code" / "home" / "sessions",
+        ]
+        return next((p for p in candidates if p and p.is_dir()), None)
 
     def available(self) -> bool:
-        return self.base_dir.is_dir()
+        return self._get_base_dir() is not None
 
     def _get_wire_files(self) -> list:
-        if not self.base_dir.is_dir():
+        base_dir = self._get_base_dir()
+        if not base_dir or not base_dir.is_dir():
             return []
-        wires = list(self.base_dir.glob("*/*/agents/main/wire.jsonl"))
+        wires = list(base_dir.glob("*/*/agents/main/wire.jsonl"))
         wires.sort(key=lambda p: p.stat().st_mtime, reverse=True)
         return wires[:8]
 
