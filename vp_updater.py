@@ -413,188 +413,56 @@ def install_launcher() -> Path:
 UNINSTALL_CMD = """@echo off
 setlocal
 cd /d "%~dp0"
-set "PYW="
-if exist "%LOCALAPPDATA%\\Programs\\Python\\Python312\\pythonw.exe" set "PYW=%LOCALAPPDATA%\\Programs\\Python\\Python312\\pythonw.exe"
-if not defined PYW (
-    for /f "tokens=*" %%i in ('where pythonw.exe 2^>nul') do if not defined PYW set "PYW=%%i"
-)
-if not defined PYW (
-    for /f "tokens=*" %%i in ('where python.exe 2^>nul') do if not defined PYW set "PYW=%%i"
-)
-if defined PYW if exist "%~dp0uninstall.pyw" (
-    start "" "%PYW%" "%~dp0uninstall.pyw" %*
-    exit /b 0
-)
 set "ARG="
 if /i "%~1"=="/quiet" set "ARG=-Quiet"
 if /i "%~1"=="/silent" set "ARG=-Quiet"
 if /i "%~1"=="--quiet" set "ARG=-Quiet"
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0uninstall.ps1" %ARG%
+powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "%~dp0uninstall.ps1" %ARG%
 exit /b 0
 """
 
 UNINSTALL_PS1 = """param([switch]$Quiet)
 
-if (-not $Quiet) {
-    Add-Type -AssemblyName System.Windows.Forms
-    $res = [System.Windows.Forms.MessageBox]::Show(
-        "Вы действительно хотите удалить VoicePlayer с вашего компьютера?",
-        "Удаление VoicePlayer",
-        [System.Windows.Forms.MessageBoxButtons]::YesNo,
-        [System.Windows.Forms.MessageBoxIcon]::Question
-    )
-    if ($res -ne [System.Windows.Forms.DialogResult]::Yes) {
-        exit 0
-    }
-}
+# 1. Немедленно удаляем запись из «Установленных приложений» Windows (HKCU Uninstall)
+Remove-Item -Path "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\VoicePlayer" -Recurse -Force -ErrorAction SilentlyContinue
 
-# 1. Завершить запущенные процессы VoicePlayer
+# 2. Завершаем все запущенные процессы VoicePlayer
 Get-Process | Where-Object { $_.MainWindowTitle -like "*VoicePlayer*" } | Stop-Process -Force -ErrorAction SilentlyContinue
-Get-WmiObject Win32_Process | Where-Object { $_.CommandLine -like "*voice-player*" -and $_.ProcessId -ne $PID } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object { 
+    ($_.CommandLine -like "*voice-player*" -or $_.CommandLine -like "*VoicePlayer*") -and $_.ProcessId -ne $PID 
+} | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
 
-# 2. Удалить ярлыки с Рабочего стола и меню Пуск
+# 3. Удаляем ярлыки с Рабочего стола и меню Пуск
 foreach ($d in @([Environment]::GetFolderPath('Desktop'), [Environment]::GetFolderPath('Programs'))) {
     $lnk = Join-Path $d "VoicePlayer.lnk"
     if (Test-Path $lnk) { Remove-Item $lnk -Force -ErrorAction SilentlyContinue }
+    $un_lnk = Join-Path $d "Удалить VoicePlayer.lnk"
+    if (Test-Path $un_lnk) { Remove-Item $un_lnk -Force -ErrorAction SilentlyContinue }
 }
 
-# 3. Удалить запись из «Установленных приложений» Windows
-Remove-Item -Path "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\VoicePlayer" -Recurse -Force -ErrorAction SilentlyContinue
+# 4. Удаляем хуки интеграции с нейросетями
+$hooksDir = Join-Path $env:USERPROFILE ".voice-player\\hooks"
+if (Test-Path $hooksDir) {
+    Remove-Item $hooksDir -Recurse -Force -ErrorAction SilentlyContinue
+}
 
-# 4. Удалить файлы
+# 5. Очищаем рабочую папку VoicePlayer в фоне через cmd
 $vpHome = Join-Path $env:USERPROFILE ".voice-player"
 Start-Process -FilePath "cmd.exe" -ArgumentList "/c timeout /t 1 /nobreak >nul & rd /s /q `"$vpHome`"" -WindowStyle Hidden
 
 if (-not $Quiet) {
-    [System.Windows.Forms.MessageBox]::Show(
-        "VoicePlayer успешно удален с вашего компьютера.",
-        "Удаление VoicePlayer",
-        [System.Windows.Forms.MessageBoxButtons]::OK,
-        [System.Windows.Forms.MessageBoxIcon]::Information
-    )
+    try {
+        Add-Type -AssemblyName System.Windows.Forms -ErrorAction SilentlyContinue
+        [System.Windows.Forms.MessageBox]::Show(
+            "VoicePlayer успешно удален с вашего компьютера.",
+            "VoicePlayer",
+            [System.Windows.Forms.MessageBoxButtons]::OK,
+            [System.Windows.Forms.MessageBoxIcon]::Information,
+            [System.Windows.Forms.MessageBoxDefaultButton]::Button1,
+            [System.Windows.Forms.MessageBoxOptions]::DefaultDesktopOnly
+        )
+    } catch {}
 }
-"""
-
-UNINSTALL_PYW = """import os
-import shutil
-import subprocess
-import sys
-import tkinter as tk
-from pathlib import Path
-from tkinter import messagebox
-
-NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-
-def main():
-    args = [a.lower() for a in sys.argv[1:]]
-    quiet = any(a in args for a in ("/quiet", "/silent", "--quiet", "--silent"))
-    home = Path.home() / ".voice-player"
-
-    if not quiet:
-        root = tk.Tk()
-        root.title("Удаление VoicePlayer")
-        root.geometry("480x250")
-        root.resizable(False, False)
-        root.configure(bg="#131615")
-
-        ico = home / "icon.ico"
-        if ico.is_file():
-            try: root.iconbitmap(default=str(ico))
-            except Exception: pass
-
-        root.update_idletasks()
-        sw, sh = root.winfo_screenwidth(), root.winfo_screenheight()
-        root.geometry(f"480x250+{(sw - 480) // 2}+{(sh - 250) // 2}")
-
-        f = tk.Frame(root, bg="#131615", padx=24, pady=22)
-        f.pack(fill="both", expand=True)
-
-        tk.Label(f, text="Удаление VoicePlayer", bg="#131615", fg="#e8ecea",
-                 font=("Segoe UI Semibold", 13), anchor="w").pack(fill="x")
-        tk.Label(f, text="Вы действительно хотите удалить VoicePlayer с вашего компьютера?",
-                 bg="#131615", fg="#7c8782", font=("Segoe UI", 10), justify="left", anchor="w").pack(fill="x", pady=(8, 14))
-
-        var_purge = tk.BooleanVar(value=True)
-        cb = tk.Checkbutton(f, text="Удалить сохранённую историю, аудиозаписи и настройки",
-                            variable=var_purge, bg="#131615", fg="#e8ecea", selectcolor="#1c211f",
-                            activebackground="#131615", activeforeground="#e8ecea", font=("Segoe UI", 9))
-        cb.pack(anchor="w", pady=(0, 20))
-
-        btn_box = tk.Frame(f, bg="#131615")
-        btn_box.pack(fill="x")
-
-        def do_uninstall():
-            btn_del.configure(state="disabled", text="Удаление...")
-            root.update()
-            perform_uninstall(purge_user_data=var_purge.get(), home=home)
-            root.destroy()
-            try:
-                messagebox.showinfo("Удаление VoicePlayer", "VoicePlayer успешно удален с вашего компьютера.")
-            except Exception:
-                pass
-            sys.exit(0)
-
-        btn_del = tk.Button(btn_box, text="Удалить VoicePlayer", command=do_uninstall,
-                            bg="#fc3c44", fg="#ffffff", activebackground="#d93239", activeforeground="#ffffff",
-                            font=("Segoe UI Semibold", 9), bd=0, padx=14, pady=6, cursor="hand2")
-        btn_del.pack(side="left")
-
-        tk.Button(btn_box, text="Отмена", command=root.destroy,
-                  bg="#1c211f", fg="#e8ecea", activebackground="#262e2b", activeforeground="#e8ecea",
-                  font=("Segoe UI", 9), bd=0, padx=12, pady=6, cursor="hand2").pack(side="right")
-
-        root.mainloop()
-    else:
-        perform_uninstall(purge_user_data=True, home=home)
-
-def perform_uninstall(purge_user_data: bool, home: Path):
-    try:
-        subprocess.run(["taskkill", "/F", "/FI", "WINDOWTITLE eq VoicePlayer*"],
-                       capture_output=True, timeout=5, creationflags=NO_WINDOW)
-    except Exception:
-        pass
-    try:
-        ps_kill = "Get-WmiObject Win32_Process | Where-Object { $_.CommandLine -like '*voice-player*' -and $_.ProcessId -ne $PID } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }"
-        subprocess.run(["powershell", "-NoProfile", "-Command", ps_kill],
-                       capture_output=True, timeout=10, creationflags=NO_WINDOW)
-    except Exception:
-        pass
-
-    ps_lnk = '''
-    foreach ($d in @([Environment]::GetFolderPath('Desktop'), [Environment]::GetFolderPath('Programs'))) {
-        $l = Join-Path $d 'VoicePlayer.lnk'
-        if (Test-Path $l) { Remove-Item $l -Force -ErrorAction SilentlyContinue }
-    }
-    '''
-    try:
-        subprocess.run(["powershell", "-NoProfile", "-Command", ps_lnk],
-                       capture_output=True, timeout=10, creationflags=NO_WINDOW)
-    except Exception:
-        pass
-
-    try:
-        import winreg
-        key_path = r"Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\VoicePlayer"
-        winreg.DeleteKey(winreg.HKEY_CURRENT_USER, key_path)
-    except Exception:
-        pass
-
-    if purge_user_data:
-        cmd = f'timeout /t 1 /nobreak >nul & rd /s /q "{home}"'
-        subprocess.Popen(["cmd.exe", "/c", cmd], creationflags=NO_WINDOW)
-    else:
-        for sub in ("versions", "hooks", "updates"):
-            p = home / sub
-            if p.is_dir():
-                shutil.rmtree(p, ignore_errors=True)
-        for fn in ("launch.cmd", "launch.pyw", "launch.sh", "icon.ico", "icon.png"):
-            p = home / fn
-            if p.is_file():
-                try: p.unlink()
-                except Exception: pass
-
-if __name__ == "__main__":
-    main()
 """
 
 
@@ -612,9 +480,10 @@ def register_windows_uninstaller(version: str = "") -> None:
         h = home_dir()
         h.mkdir(parents=True, exist_ok=True)
 
-        (h / "uninstall.cmd").write_text(UNINSTALL_CMD, encoding="ascii", errors="ignore")
-        (h / "uninstall.ps1").write_text(UNINSTALL_PS1, encoding="utf-8")
-        (h / "uninstall.pyw").write_text(UNINSTALL_PYW, encoding="utf-8")
+        ps1_file = h / "uninstall.ps1"
+        cmd_file = h / "uninstall.cmd"
+        ps1_file.write_text(UNINSTALL_PS1, encoding="utf-8")
+        cmd_file.write_text(UNINSTALL_CMD, encoding="ascii", errors="ignore")
 
         ico = h / "icon.ico"
         if not ico.is_file():
@@ -625,7 +494,6 @@ def register_windows_uninstaller(version: str = "") -> None:
                 except Exception:
                     pass
 
-        uninstall_cmd = h / "uninstall.cmd"
         size_kb = 28000
         try:
             total_b = sum(f.stat().st_size for f in h.rglob("*") if f.is_file())
@@ -633,6 +501,9 @@ def register_windows_uninstaller(version: str = "") -> None:
                 size_kb = int(total_b // 1024)
         except Exception:
             pass
+
+        uninst_cmd = f'powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "{ps1_file}"'
+        uninst_quiet = f'powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "{ps1_file}" -Quiet'
 
         key_path = r"Software\Microsoft\Windows\CurrentVersion\Uninstall\VoicePlayer"
         with winreg.CreateKey(winreg.HKEY_CURRENT_USER, key_path) as k:
@@ -642,8 +513,8 @@ def register_windows_uninstaller(version: str = "") -> None:
             winreg.SetValueEx(k, "DisplayIcon", 0, winreg.REG_SZ, f'"{ico}",0' if ico.is_file() else str(ico))
             winreg.SetValueEx(k, "InstallLocation", 0, winreg.REG_SZ, str(h))
             winreg.SetValueEx(k, "InstallDate", 0, winreg.REG_SZ, time.strftime("%Y%m%d"))
-            winreg.SetValueEx(k, "UninstallString", 0, winreg.REG_SZ, f'cmd.exe /c ""{uninstall_cmd}""')
-            winreg.SetValueEx(k, "QuietUninstallString", 0, winreg.REG_SZ, f'cmd.exe /c ""{uninstall_cmd}"" /quiet')
+            winreg.SetValueEx(k, "UninstallString", 0, winreg.REG_SZ, uninst_cmd)
+            winreg.SetValueEx(k, "QuietUninstallString", 0, winreg.REG_SZ, uninst_quiet)
             winreg.SetValueEx(k, "EstimatedSize", 0, winreg.REG_DWORD, size_kb)
             winreg.SetValueEx(k, "HelpLink", 0, winreg.REG_SZ, "https://infostroper-cloud.github.io/voice-player/")
             winreg.SetValueEx(k, "URLInfoAbout", 0, winreg.REG_SZ, "https://infostroper-cloud.github.io/voice-player/")
