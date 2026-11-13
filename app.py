@@ -2571,6 +2571,18 @@ class VoicePlayerApp:
         if IS_MAC:
             return ("Helvetica Neue", size, "bold")
         return ("Segoe UI Semibold", size)
+
+    @staticmethod
+    def _bind_context(widget, callback, add="+"):
+        """Кроссплатформенная привязка контекстного меню (ПКМ):
+        - Windows/Linux: <Button-3>, <Control-Button-1>
+        - macOS: <Button-2> (клик/тап двумя пальцами на тачпаде Mac), <Button-3> (внешняя мышь), <Control-Button-1>
+        """
+        widget.bind("<Button-3>", callback, add=add)
+        widget.bind("<Control-Button-1>", callback, add=add)
+        if IS_MAC:
+            widget.bind("<Button-2>", callback, add=add)
+
     @staticmethod
     def _tt(widget, text):
         """Навесить подсказку и вернуть виджет (для цепочки .grid()/.pack())."""
@@ -3607,6 +3619,7 @@ class VoicePlayerApp:
         self.search_frame = ttk.Frame(sub_bars)
         self.search_entry = ttk.Entry(self.search_frame, textvariable=self.var_search)
         self.search_entry.pack(side="left", fill="x", expand=True, padx=(0, 6))
+        self._bind_context(self.search_entry, self._show_entry_menu)
         ttk.Button(self.search_frame, text="✕", width=3,
                    command=self._toggle_search).pack(side="left")
 
@@ -3637,7 +3650,7 @@ class VoicePlayerApp:
         self.tree.bind("<Double-Button-1>", lambda e: self._play_selected())
         self.tree.bind("<Return>",          lambda e: self._play_selected())
         self.tree.bind("<<TreeviewSelect>>", self._on_tree_select)
-        self.tree.bind("<Button-3>",        self._show_context_menu)
+        self._bind_context(self.tree,       self._show_context_menu)
         self.tree.bind("<Delete>",          lambda e: self._delete_selected())
         self.tree.bind("<Control-KeyPress>", self._tree_ctrl)
         self.tree.bind("<MouseWheel>",      lambda e: self.root.after_idle(self._update_row_waves), add="+")
@@ -3698,6 +3711,7 @@ class VoicePlayerApp:
         self.tts_input.bind("<Control-Return>", lambda e: (self._speak_input(), "break")[1])
         self.tts_input.bind("<Control-KeyPress>", self._input_ctrl)
         self.tts_input.bind("<<Paste>>", self._on_input_paste)
+        self._bind_context(self.tts_input, self._show_tts_input_menu)
 
         # -------------------- ПРАВАЯ КОЛОНКА: ПАНЕЛЬ ЧТЕНИЯ И ИНСТРУМЕНТЫ --------------------
         self.text_frame = ttk.Frame(self.body, padding=(16, 10))
@@ -3844,7 +3858,7 @@ class VoicePlayerApp:
         self.text_widget.bind("<Button-1>", self._on_text_click)
         self.text_widget.bind("<KeyPress>", self._text_panel_key)
         self.text_widget.bind("<Control-KeyPress>", self._text_panel_ctrl)
-        self.text_widget.bind("<Button-3>", self._text_panel_menu)
+        self._bind_context(self.text_widget, self._text_panel_menu)
         self.text_widget.bind("<Control-MouseWheel>",
                                lambda e: self._change_text_font(1 if e.delta > 0 else -1))
         self.text_widget.bind("<Configure>", self._on_text_panel_resize)
@@ -4884,6 +4898,7 @@ class VoicePlayerApp:
         ttk.Checkbutton(top, text="по смыслу", variable=sem).pack(side="left", padx=(6, 0))
         ent.bind("<Return>", refresh)
         tree.bind("<Double-Button-1>", reopen)
+        self._bind_context(tree, reopen)
         ttk.Label(win, text="Двойной клик по строке — добавить в очередь · «по смыслу» = семантический поиск",
                   style="Dim.TLabel").pack(anchor="w", padx=10, pady=(0, 8))
         refresh()
@@ -5397,6 +5412,7 @@ class VoicePlayerApp:
                 )
                 cv.bind("<Button-1>", lambda _e, row_iid=iid: (self.tree.selection_set(row_iid), self._on_tree_select()))
                 cv.bind("<Double-Button-1>", lambda _e, row_iid=iid: (self.tree.selection_set(row_iid), self._play_selected()))
+                self._bind_context(cv, lambda _e, row_iid=iid: self._show_context_menu_for_row(_e, row_iid))
             except Exception:
                 pass
 
@@ -5678,9 +5694,42 @@ class VoicePlayerApp:
         menu = tk.Menu(self.root, tearoff=0, bg=c["panel"], fg=c["ink"],
                        activebackground=c["sel"], activeforeground=c["ink"], bd=0)
         menu.add_command(label="Копировать", command=self._text_panel_copy)
+        if getattr(self, "_editing_text", False):
+            menu.add_command(label="Вырезать", command=lambda: self.text_widget.event_generate("<<Cut>>"))
+            menu.add_command(label="Вставить", command=lambda: self.text_widget.event_generate("<<Paste>>"))
         menu.add_command(label="Выделить всё", command=self._text_panel_select_all)
         try: menu.tk_popup(event.x_root, event.y_root)
         finally: menu.grab_release()
+        return "break"
+
+    def _show_tts_input_menu(self, event):
+        c = self.colors
+        menu = tk.Menu(self.root, tearoff=0, bg=c["panel"], fg=c["ink"],
+                       activebackground=c["sel"], activeforeground=c["ink"], bd=0)
+        menu.add_command(label="✂ Вырезать", command=lambda: self.tts_input.event_generate("<<Cut>>"))
+        menu.add_command(label="📋 Копировать", command=lambda: self.tts_input.event_generate("<<Copy>>"))
+        menu.add_command(label="📥 Вставить", command=self._paste_into_input)
+        menu.add_separator()
+        menu.add_command(label="Выделить всё", command=lambda: (self.tts_input.tag_add("sel", "1.0", "end"), self.tts_input.mark_set("insert", "end")))
+        menu.add_command(label="Очистить", command=lambda: (self.tts_input.delete("1.0", "end"), self.tts_input.configure(height=3)))
+        try: menu.tk_popup(event.x_root, event.y_root)
+        finally: menu.grab_release()
+        return "break"
+
+    def _show_entry_menu(self, event):
+        w = event.widget
+        c = self.colors
+        menu = tk.Menu(self.root, tearoff=0, bg=c["panel"], fg=c["ink"],
+                       activebackground=c["sel"], activeforeground=c["ink"], bd=0)
+        menu.add_command(label="✂ Вырезать", command=lambda: w.event_generate("<<Cut>>"))
+        menu.add_command(label="📋 Копировать", command=lambda: w.event_generate("<<Copy>>"))
+        menu.add_command(label="📥 Вставить", command=lambda: w.event_generate("<<Paste>>"))
+        menu.add_separator()
+        menu.add_command(label="Выделить всё", command=lambda: (w.select_range(0, "end"), w.icursor("end")))
+        menu.add_command(label="Очистить", command=lambda: w.delete(0, "end"))
+        try: menu.tk_popup(event.x_root, event.y_root)
+        finally: menu.grab_release()
+        return "break"
 
     def _seek_safe(self, seconds: float):
         try:
@@ -5840,7 +5889,7 @@ class VoicePlayerApp:
                          pady=(1 if row.get("head") else 0, 1))
                 lbl.bind("<MouseWheel>", lambda e: (text.yview_scroll(-3 if e.delta > 0 else 3, "units"), "break")[1])
                 lbl.bind("<Control-MouseWheel>", lambda e: self._change_text_font(1 if e.delta > 0 else -1))
-                lbl.bind("<Button-3>", self._text_panel_menu)
+                self._bind_context(lbl, self._text_panel_menu)
                 if not row.get("head"):
                     target = next((a for c, a, _b in row["spans"] if c == col), row["a"])
                     lbl.bind("<Button-1>", lambda e, ch=target: self._seek_to_char(ch))
@@ -6660,8 +6709,25 @@ class VoicePlayerApp:
             # если по уже выделенной — сохранить мультивыбор
             if rowid not in self.tree.selection():
                 self.tree.selection_set(rowid)
+                self._on_tree_select()
             try: self.ctx_menu.tk_popup(event.x_root, event.y_root)
             finally: self.ctx_menu.grab_release()
+        elif self.tree.selection():
+            try: self.ctx_menu.tk_popup(event.x_root, event.y_root)
+            finally: self.ctx_menu.grab_release()
+        else:
+            try: self._list_menu.tk_popup(event.x_root, event.y_root)
+            finally: self._list_menu.grab_release()
+        return "break"
+
+    def _show_context_menu_for_row(self, event, rowid):
+        if rowid:
+            if rowid not in self.tree.selection():
+                self.tree.selection_set(rowid)
+                self._on_tree_select()
+            try: self.ctx_menu.tk_popup(event.x_root, event.y_root)
+            finally: self.ctx_menu.grab_release()
+        return "break"
 
     def _on_tree_select(self, _event=None):
         idx = self._selected_idx()
