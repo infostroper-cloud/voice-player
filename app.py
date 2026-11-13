@@ -2002,6 +2002,7 @@ class _HookHandler(BaseHTTPRequestHandler):
             except Exception:
                 pass
             self.close_connection = True
+            log_line("HTTP /api/show received -> activating window")
             self.app.root.after(0, self.app._show_window)
             self._json(200, {"ok": True}); return
         if self.path == "/api/clear":
@@ -2867,11 +2868,10 @@ class VoicePlayerApp:
         try:
             import uuid as _uuid
             prog_dir = Path(lad) / "Programs" / "VoicePlayer" if lad else None
-            launch_cmd = (prog_dir / "launch.cmd") if (prog_dir and (prog_dir / "launch.cmd").exists()) else (Path.home() / ".voice-player" / "launch.cmd")
             launcher = (prog_dir / "launch.pyw") if (prog_dir and (prog_dir / "launch.pyw").exists()) else (Path.home() / ".voice-player" / "launch.pyw")
             gui_py = vp_updater.gui_python()
             target = launcher if launcher.exists() else (APP_DIR / "app.py")
-            relaunch_cmd = str(launch_cmd) if launch_cmd.exists() else f'"{gui_py}" "{target}"'
+            relaunch_cmd = f'"{gui_py}" "{target}"'
 
             class GUID(ctypes.Structure):
                 _fields_ = [("Data1", ctypes.c_ulong), ("Data2", ctypes.c_ushort),
@@ -7529,18 +7529,31 @@ class VoicePlayerApp:
     def _show_window(self):
         """Вывести окно на передний план (трей, повторный запуск ярлыка, горячая клавиша)."""
         try:
+            log_line("_show_window requested")
             if self.mini is not None and self.mini.winfo_exists():
                 self._exit_mini()
             self.root.deiconify()
             self.root.state("normal")
             if IS_WIN:
                 try:
-                    wid = self.root.winfo_id()
-                    hwnd = ctypes.windll.user32.GetAncestor(wid, 2) or wid
-                    ctypes.windll.user32.ShowWindow(hwnd, 9)  # SW_RESTORE
-                    ctypes.windll.user32.SetForegroundWindow(hwnd)
-                except Exception:
-                    pass
+                    hwnd = self._top_hwnd()
+                    if hwnd:
+                        u32 = ctypes.windll.user32
+                        u32.ShowWindow(hwnd, 9)   # SW_RESTORE
+                        u32.ShowWindow(hwnd, 5)   # SW_SHOW
+                        fg_hwnd = u32.GetForegroundWindow()
+                        fg_thread = u32.GetWindowThreadProcessId(fg_hwnd, None) if fg_hwnd else 0
+                        cur_thread = ctypes.windll.kernel32.GetCurrentThreadId()
+                        if fg_thread and fg_thread != cur_thread:
+                            u32.AttachThreadInput(cur_thread, fg_thread, True)
+                            u32.SetForegroundWindow(hwnd)
+                            u32.BringWindowToTop(hwnd)
+                            u32.AttachThreadInput(cur_thread, fg_thread, False)
+                        else:
+                            u32.SetForegroundWindow(hwnd)
+                            u32.BringWindowToTop(hwnd)
+                except Exception as e:
+                    log_line(f"win foreground error: {e}")
             elif sys.platform == "darwin":
                 try:
                     subprocess.run(["osascript", "-e", 'tell application "VoicePlayer" to activate'],
@@ -7556,9 +7569,9 @@ class VoicePlayerApp:
             self.root.attributes("-topmost", True)   # гарантированный фокус поверх окон
             self.root.lift()
             self.root.focus_force()
-            self.root.after(150, lambda: self.root.attributes("-topmost", False))
-        except Exception:
-            pass
+            self.root.after(250, lambda: self.root.attributes("-topmost", False))
+        except Exception as e:
+            log_line(f"_show_window error: {e}")
 
     def _toggle_window(self):
         """Ctrl+Alt+P: показать плеер, а если он уже перед глазами — свернуть."""
@@ -9318,27 +9331,36 @@ def _activate_running_instance() -> bool:
     import socket, urllib.error, urllib.request
     if IS_WIN:
         try:
-            ctypes.windll.user32.AllowSetForegroundWindow(-1)   # разрешить запущенной копии взять фокус
+            from ctypes import wintypes
+            u32 = ctypes.windll.user32
+            u32.AllowSetForegroundWindow.argtypes = [wintypes.DWORD]
+            u32.AllowSetForegroundWindow.restype = wintypes.BOOL
+            u32.AllowSetForegroundWindow(0xFFFFFFFF)   # ASFW_ANY
         except Exception:
             pass
     for port in (HTTP_PORT, 3738, 3739, 3740):
-        # Быстрая проверка TCP connect за 150 мс, чтобы не ждать закрытые порты
+        # Быстрая проверка TCP connect за 250 мс, чтобы не ждать закрытые порты
         try:
-            with socket.create_connection((HTTP_HOST, port), timeout=0.15):
+            with socket.create_connection((HTTP_HOST, port), timeout=0.25):
                 pass
         except OSError:
             continue
         try:
             req = urllib.request.Request(f"http://{HTTP_HOST}:{port}/api/show", data=b"{}")
-            urllib.request.build_opener(urllib.request.ProxyHandler({})).open(req, timeout=1.5).read()
+            urllib.request.build_opener(urllib.request.ProxyHandler({})).open(req, timeout=3.0).read()
             return True
         except urllib.error.HTTPError:
             continue                        # на порту кто-то другой или старая версия
         except (urllib.error.URLError, TimeoutError) as e:
             is_timeout = isinstance(e, TimeoutError) or isinstance(getattr(e, "reason", None), TimeoutError)
             if is_timeout:
-                _kill_zombie_on_port(port)
-                _dead_ports.add(port)
+                try:
+                    ping_req = urllib.request.Request(f"http://{HTTP_HOST}:{port}/api/ping")
+                    urllib.request.build_opener(urllib.request.ProxyHandler({})).open(ping_req, timeout=1.0).read()
+                    return True   # Процесс жив и отвечает на пинг, не убиваем
+                except Exception:
+                    _kill_zombie_on_port(port)
+                    _dead_ports.add(port)
             continue
         except Exception:
             continue

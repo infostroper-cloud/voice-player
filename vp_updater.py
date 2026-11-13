@@ -396,7 +396,7 @@ def stable_hook_home(app_dir: Path) -> Path:
     return home_dir()
 
 
-LAUNCHER = '''import pathlib, subprocess, sys
+LAUNCHER = '''import os, pathlib, runpy, sys
 root = pathlib.Path(__file__).resolve().parent / "versions"
 if not root.exists():
     root = pathlib.Path.home() / ".voice-player" / "versions"
@@ -411,8 +411,10 @@ best = vp_updater.best_installed()
 if best:
     target = best
 vp_updater._note_start(target)
-flags = 0x00000008 if sys.platform == "win32" else 0
-subprocess.Popen([vp_updater.gui_python(), str(target / "app.py")], cwd=str(target), creationflags=flags)
+os.chdir(str(target))
+app_file = str(target / "app.py")
+sys.argv[0] = app_file
+runpy.run_path(app_file, run_name="__main__")
 '''
 
 
@@ -421,7 +423,7 @@ def install_launcher() -> Path:
     py = home_dir() / "launch.pyw"
     py.write_text(LAUNCHER, encoding="utf-8")
     if os.name == "nt":
-        (home_dir() / "launch.cmd").write_text(f'@start "" "{gui_python()}" "%~dp0launch.pyw"\r\n', encoding="ascii")
+        (home_dir() / "launch.cmd").write_text(f'@start "" "{gui_python()}" "%~dp0launch.pyw" %*\r\n', encoding="ascii")
     else:
         sh = home_dir() / "launch.sh"
         sh.write_text(f'#!/usr/bin/env bash\nexec "{gui_python()}" "{py}" "$@"\n', encoding="utf-8")
@@ -601,6 +603,8 @@ def create_shortcuts(desktop: bool = True, start_menu: bool = True, auto_start: 
             shutil.copy2(best / "icon.ico", h / "icon.ico")
         except Exception:
             pass
+    py_bin = gui_python()
+    py_launcher = str(h / "launch.pyw")
     cmd_path = str(h / "launch.cmd")
     ico_path = str(h / "icon.ico")
     dirs = []
@@ -616,8 +620,12 @@ def create_shortcuts(desktop: bool = True, start_menu: bool = True, auto_start: 
             f"foreach ($d in {dirs_expr}) {{"
             f"if ($d -and (Test-Path $d)) {{"
             f"$l = $s.CreateShortcut((Join-Path $d 'VoicePlayer.lnk'));"
-            f"$l.TargetPath = '{cmd_path}'; $l.WorkingDirectory = '{str(h)}'; $l.WindowStyle = 7;"
-            f"$l.IconLocation = '{ico_path}'; $l.Save() }}}}"
+            f"$l.TargetPath = '{py_bin}';"
+            f"$l.Arguments = '`\"{py_launcher}`\"';"
+            f"$l.WorkingDirectory = '{str(h)}';"
+            f"$l.WindowStyle = 1;"
+            f"$l.IconLocation = '{ico_path},0';"
+            f"$l.Save() }}}}"
         )
         try:
             subprocess.run(["powershell", "-NoProfile", "-Command", script], check=True, timeout=60, creationflags=NO_WINDOW)
@@ -628,7 +636,7 @@ def create_shortcuts(desktop: bool = True, start_menu: bool = True, auto_start: 
             import winreg
             run_key = r"Software\Microsoft\Windows\CurrentVersion\Run"
             with winreg.CreateKey(winreg.HKEY_CURRENT_USER, run_key) as k:
-                winreg.SetValueEx(k, "VoicePlayer", 0, winreg.REG_SZ, f'"{cmd_path}"')
+                winreg.SetValueEx(k, "VoicePlayer", 0, winreg.REG_SZ, f'"{py_bin}" "{py_launcher}" --background')
         except Exception:
             pass
     register_windows_uninstaller()
