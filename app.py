@@ -6466,6 +6466,11 @@ class VoicePlayerApp:
         self._update_text_panel()
         self._render_list()
         self._save_session()
+        try:
+            if hasattr(self, "watchers") and self.watchers:
+                self.watchers.mark_all_seen()
+        except Exception as e:
+            log_line(f"clear_queue mark_all_seen error: {e}")
 
     def _spawn_render_workers(self, workers: int):
         for i in range(workers):

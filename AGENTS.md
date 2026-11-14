@@ -41,6 +41,8 @@ VoicePlayer automatically listens for responses from AI coding assistants and ag
 
 1. **Playlist Persistence (`SESSION_FILE` = `~/.voice-player-session.json`)**:
    * `clear_queue()` MUST call `self._save_session()` immediately so the cleared state persists across restarts.
+   * `clear_queue()` MUST also call `self.watchers.mark_all_seen()` to advance all watcher offsets and seen sets to EOF, ensuring past dialogues never re-emerge.
+   * `_restore_session()` must never fall back to `_load_saved_items()` if `SESSION_FILE` exists (even if empty).
    * Pinned items (`📌`, `it.pinned`) are preserved during `clear_queue()`.
 2. **App Startup Behavior**:
    * On startup, DO NOT automatically call `_pull_recent_ai(limit_per_source=5)`. Startup must strictly restore the saved `SESSION_FILE` and start watcher background threads.

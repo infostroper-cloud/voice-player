@@ -210,6 +210,39 @@ class CodexWatcher:
         self.state["seen"] = [r[1] for r in rows if abs(_ts(r[2]) - cursor) < 2.0]
         return out
 
+    def mark_all_seen(self) -> None:
+        now = time.time()
+        rfiles = self.state.setdefault("rollouts", {})
+        for path in self._recent_rollout_files(now):
+            try:
+                st = os.stat(path)
+                rec = rfiles.get(path)
+                if rec is None:
+                    rfiles[path] = {
+                        "off": st.st_size,
+                        "session": "",
+                        "originator": "",
+                        "title": "",
+                        "q": "",
+                        "subagent": False,
+                    }
+                else:
+                    rec["off"] = st.st_size
+            except OSError:
+                continue
+        self.state["rollouts_init"] = True
+        db = _latest(self.home, "thread_history_*.sqlite")
+        if db:
+            try:
+                con = _ro(db)
+                secs = ("(CASE WHEN t.completed_at > 100000000000 "
+                        "THEN t.completed_at / 1000.0 ELSE t.completed_at END)")
+                row = con.execute(f"SELECT MAX({secs}) FROM thread_turns t").fetchone()
+                if row and row[0]:
+                    self.state["cursor"] = float(row[0])
+            except Exception:
+                pass
+
     def _recent_rollout_files(self, now: float) -> list:
         sess_dir = self.home / "sessions"
         if not sess_dir.is_dir():
@@ -424,6 +457,26 @@ class AntigravityWatcher:
         for p in [p for p in files if not os.path.exists(p)]:
             files.pop(p, None)
         return out
+
+    def mark_all_seen(self) -> None:
+        files = self.state.setdefault("files", {})
+        for path in self._transcripts():
+            try:
+                st = os.stat(path)
+                rec = files.get(path)
+                if rec is None:
+                    title = self._peek_title(path)
+                    files[path] = {
+                        "off": st.st_size,
+                        "user": False,
+                        "q": "",
+                        "title": title,
+                    }
+                else:
+                    rec["off"] = st.st_size
+            except OSError:
+                continue
+        self.state["init"] = True
 
     @staticmethod
     def _peek_title(path: str) -> str:
@@ -1102,6 +1155,24 @@ class DeepSeekWatcher:
         self.state["init"] = True
         return out
 
+    def mark_all_seen(self) -> None:
+        if not self.available():
+            return
+        seen = set(self.state.get("seen", []))
+        seen_texts = self.state.setdefault("seen_texts", {})
+        zstds = self._get_zstd_files(limit=16)
+        for zpath in zstds:
+            sess_id = zpath.parent.name.replace("session-", "")
+            turns, title = self._parse_zstd_session(zpath)
+            for tnum, t in turns.items():
+                key = f"dsh:{sess_id}:{tnum}"
+                seen.add(key)
+                parts = t.get("text_parts", [])
+                if parts:
+                    seen_texts[key] = parts[-1].strip()
+        self.state["seen"] = list(seen)[-2000:]
+        self.state["init"] = True
+
     def fetch_recent(self, limit: int = 5) -> list:
         if not self.available():
             return []
@@ -1334,6 +1405,24 @@ class KimiWatcher:
         self.state["init"] = True
         return out
 
+    def mark_all_seen(self) -> None:
+        if not self.available():
+            return
+        seen = set(self.state.get("seen", []))
+        seen_texts = self.state.setdefault("seen_texts", {})
+        zstds = self._get_zstd_files(limit=16)
+        for zpath in zstds:
+            sess_id = zpath.parent.name.replace("session-", "")
+            turns, title = self._parse_zstd_session(zpath)
+            for tnum, t in turns.items():
+                key = f"dsh:{sess_id}:{tnum}"
+                seen.add(key)
+                parts = t.get("text_parts", [])
+                if parts:
+                    seen_texts[key] = parts[-1].strip()
+        self.state["seen"] = list(seen)[-2000:]
+        self.state["init"] = True
+
     def fetch_recent(self, limit: int = 5) -> list:
         if not self.available():
             return []
@@ -1442,6 +1531,17 @@ class Watchers:
         if changed:
             self.save()
         return out
+
+    def mark_all_seen(self) -> None:
+        """Пометить все текущие реплики всех наблюдателей как прочитанные.
+        Вызывается при ручной очистке очереди, чтобы старые реплики не всплывали."""
+        for w in self.items.values():
+            if hasattr(w, "mark_all_seen"):
+                try:
+                    w.mark_all_seen()
+                except Exception as e:
+                    self.log(f"mark_all_seen error: {e}")
+        self.save()
 
     def fetch_recent(self, limit_per_source: int = 5) -> list:
         """Явно подтянуть последние диалоги и ответы из Codex и Antigravity (по кнопке или при проверке)."""
