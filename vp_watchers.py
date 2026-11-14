@@ -874,7 +874,11 @@ class DeepSeekWatcher:
         s_dir = self.dsh_dir / "sessions"
         if not s_dir.is_dir():
             return []
-        files = list(s_dir.glob("*/*/session.v4.jsonl.zstd"))
+        # Основные интерактивные сессии пользователя в DSH всегда находятся в папках с префиксом 'session-'
+        # Внутренние технические субагенты создаются сотнями в папках с голыми UUID
+        files = list(s_dir.glob("*/session-*/session.v4.jsonl.zstd"))
+        if not files:
+            files = list(s_dir.glob("*/*/session.v4.jsonl.zstd"))
         files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
         return files[:limit]
 
@@ -908,6 +912,11 @@ class DeepSeekWatcher:
                 try:
                     ev = json.loads(line)
                     t = ev.get("type")
+                    if t == "subagent/descriptor":
+                        # Игнорируем внутренние фоновые процессы субагентов
+                        self._cache[str(zpath)] = (mtime, size, {}, "")
+                        return {}, ""
+
                     data = ev.get("data", {})
                     seq = ev.get("seq", 0)
                     time_ms = ev.get("time", 0)
@@ -919,7 +928,10 @@ class DeepSeekWatcher:
                         txt = "".join(c.get("text", "") for c in content if isinstance(c, dict) and c.get("type") == "text").strip()
                         txt = re.sub(r"^Time sampled while preparing turn[^\n]*\n+", "", txt).strip()
                         txt = re.sub(r"^Browser time zone for this request[^\n]*\n+", "", txt).strip()
-                        if txt and not txt.startswith("Elapsed since the preceding"):
+                        if (txt and not txt.startswith("Elapsed since the preceding")
+                                and not txt.startswith("<system-reminder>")
+                                and not txt.startswith("The user changed ")
+                                and not txt.startswith("background job ")):
                             last_prompt = txt
                     elif t == "assistant/message":
                         turn_idx = data.get("turn")
@@ -961,7 +973,9 @@ class DeepSeekWatcher:
         sess_dir = self.dsh_dir / "storages" / "session_projcache" / "sessions"
         if not sess_dir.is_dir():
             return []
-        files = list(sess_dir.glob("*.json"))
+        files = list(sess_dir.glob("session-*.json"))
+        if not files:
+            files = list(sess_dir.glob("*.json"))
         files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
         return files[:8]
 
@@ -983,9 +997,15 @@ class DeepSeekWatcher:
                 max_turn = max(turns.keys()) if turns else 0
                 for tnum in sorted(turns.keys()):
                     t = turns[tnum]
-                    # Если ход ещё не завершён и это последний ход сессии — ждём сигнала turn/end
+                    include_reasoning = bool(self.options.get("ai_intermediate_reasoning", False))
+
+                    # Если пользователь отключил промежуточные размышления — отдаём ТОЛЬКО завершённый ответ (после turn/end)
+                    if not include_reasoning and not t.get("completed"):
+                        continue
+
+                    # Если промежуточные шаги включены, но ход ещё не завершён и это последний ход сессии — ждём сигнала turn/end
                     # В многошаговых агентах вызовы инструментов занимают 10-30 сек, поэтому не отдаём куски раньше времени
-                    if not t.get("completed") and tnum == max_turn:
+                    if include_reasoning and not t.get("completed") and tnum == max_turn:
                         try:
                             if (now - zpath.stat().st_mtime) < 45.0:
                                 continue
@@ -999,7 +1019,6 @@ class DeepSeekWatcher:
                             seen.add(key)
                         continue
 
-                    include_reasoning = bool(self.options.get("ai_intermediate_reasoning", False))
                     if include_reasoning:
                         resp = "\n\n".join(parts).strip()
                     else:
@@ -1102,6 +1121,8 @@ class DeepSeekWatcher:
                     if not parts:
                         continue
                     include_reasoning = bool(self.options.get("ai_intermediate_reasoning", False))
+                    if not include_reasoning and not t.get("completed"):
+                        continue
                     if include_reasoning:
                         resp = "\n\n".join(parts).strip()
                     else:

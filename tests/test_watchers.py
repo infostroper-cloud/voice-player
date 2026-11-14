@@ -290,6 +290,20 @@ class CodexAndAntigravityWatchers(unittest.TestCase):
         self.assertIn("Часть 1: анализ.", recent_all[1]["text"])
         self.assertIn("Часть 2: выводы.", recent_all[1]["text"])
 
+        # 5. Внутренние технические субагенты с subagent/descriptor или без префикса session- игнорируются
+        sub_dir = self.home / ".dsh" / "sessions" / "test-ws" / "00000000-subagent-uuid"
+        sub_dir.mkdir(parents=True)
+        sub_file = sub_dir / "session.v4.jsonl.zstd"
+        dctx_sub = zstd.ZstdCompressor()
+        sub_raw = "\n".join(json.dumps(ev) for ev in [
+            {"type": "subagent/descriptor", "data": {"version": 3}},
+            {"type": "assistant/message", "seq": 1, "data": {"turn": 1, "message": {"content": [{"type": "text", "text": "Subagent step 1"}]}}},
+            {"type": "turn/end", "seq": 2, "data": {"turn": 1}}
+        ]).encode("utf-8")
+        sub_file.write_bytes(dctx_sub.compress(sub_raw))
+        sub_items = watcher.poll()
+        self.assertEqual(sub_items, [])
+
     def test_kimi_watcher(self):
         wire_dir = self.home / ".kimi-desktop" / "daimon-share" / "daimon" / "runtime" / "kimi-code" / "home" / "sessions" / "s1" / "c1" / "agents" / "main"
         wire_dir.mkdir(parents=True)

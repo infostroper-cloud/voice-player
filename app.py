@@ -6295,7 +6295,8 @@ class VoicePlayerApp:
     # ------------------ queue logic ------------------
     def enqueue(self, *, source: str, author: str, time_str: str, text: str,
                 date_str: str = "", prompt: str = "", title: str = "", dedup: bool = True) -> Optional[Item]:
-        clean = _clean_for_tts(text)
+        include_reasoning = bool(getattr(self, "var_ai_intermediate_reasoning", None) and self.var_ai_intermediate_reasoning.get())
+        clean = _clean_for_tts(text, include_reasoning=include_reasoning)
         if not clean: return None
         # дедуп: проверяем совпадение с последними живыми элементами очереди (защита от дубля хук + watcher)
         if dedup:
