@@ -723,7 +723,7 @@ TTS_RATE    = "+0%"   # нейтрально: скорость регулиру�
 TTS_TIMEOUT_S = 90    # верхний предел: edge-tts временами отдаёт звук медленно, не убиваем живой рендер
                       # (реальные обрывы дочерний процесс ловит сам через connect/receive_timeout ~18с)
 TTS_RETRIES   = 1
-TTS_FIRST_PART_CHARS = 300   # первая часть короче: длинный ответ начинает звучать через несколько секунд
+TTS_FIRST_PART_CHARS = 140   # первая часть короткая (как в Speechify): звук начинается уже через 0.3–0.5 с
 TTS_PART_CHARS = 700         # остальные части: каждая с запасом успевает в TTS_TIMEOUT_S
 TTS_PARALLEL_PARTS = 3       # части одной реплики озвучиваем параллельно, чтобы звук не догонял рендер
 TTS_RETRY_DELAY_S = 2.0
@@ -1368,17 +1368,26 @@ def _map_marks_to_chars(text: str, sents: list) -> list:
 
 def _split_for_tts(body: str) -> list:
     """Разрезать текст на части [(начало, конец)]: по строкам (строка таблицы остаётся целой),
-    иначе по предложениям. Первая часть короткая — чтобы быстрее зазвучать."""
+    иначе по предложениям. Первая часть короткая (~120–140 символов) — чтобы быстрее зазвучать,
+    как в Speechify."""
     out, a, n = [], 0, len(body)
     limit = TTS_FIRST_PART_CHARS
     while n - a > limit:
         win = body[a:a + limit]
         cut = limit
-        for sep in ("\n", ". ", "! ", "? ", "… ", "; ", ", ", " "):
+        found = False
+        for sep in ("\n", ". ", "! ", "? ", "… ", ";\n"):
             p = win.rfind(sep)
-            if p >= limit * 0.4:
+            if p >= int(limit * 0.35):
                 cut = p + len(sep)
+                found = True
                 break
+        if not found:
+            for sep in ("; ", ", ", " "):
+                p = win.rfind(sep)
+                if p >= int(limit * 0.35):
+                    cut = p + len(sep)
+                    break
         out.append((a, a + cut))
         a += cut
         limit = TTS_PART_CHARS
@@ -6611,9 +6620,30 @@ class VoicePlayerApp:
             pass
 
     def _on_part_ready(self, item: Item):
-        """Поток рендера: готова очередная часть. Если реплика уже играет — дописать в трек."""
+        """Поток рендера: готова очередная часть. Если реплика уже играет — дописать в трек.
+        Если реплика только начала быть готовой и плеер свободен — запускаем звук немедленно."""
         self._sync_parts(item)
+        self.root.after(0, lambda it=item: self._check_stream_play(it))
         self.root.after(0, self._request_render)
+
+    def _check_stream_play(self, item: Item):
+        """Мгновенный старт воспроизведения первой части (как в Speechify):
+        если реплика запрошена или плеер свободен в режиме автоплея — запускаем звук сразу."""
+        if self.user_paused or self._dnd_active():
+            return
+        if self.player.is_playing():
+            return
+        # 1. Если текущий индекс указывает на эту реплику (была запрошена, но ждала рендера)
+        if 0 <= self.current_idx < len(self.queue_items) and self.queue_items[self.current_idx] is item:
+            if item.audio_ready:
+                self._play_index(self.current_idx)
+            return
+
+        # 2. Если плеер свободен и включен автоплей
+        if self.var_autoplay.get():
+            target_idx = self._auto_next_index() if self.current_idx >= 0 else self._find_next(0)
+            if target_idx >= 0 and self.queue_items[target_idx] is item and item.audio_ready:
+                self._play_index(target_idx)
 
     def _sync_parts(self, item: Item):
         with self._parts_lock:
