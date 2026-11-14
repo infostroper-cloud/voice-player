@@ -8204,9 +8204,21 @@ class VoicePlayerApp:
         cat_bar = ttk.Frame(top_box, style="Panel.TFrame")
         cat_bar.pack(fill="x", pady=(0, 6))
 
-        total_cnt = len(vp_integrations.detect()) if hasattr(vp_integrations, "detect") else 23
+        all_tools = vp_integrations.detect() if hasattr(vp_integrations, "detect") else []
+        disabled_tools = set(self.prefs.get("disabled_ai_tools", []))
+
+        def _is_connected(t):
+            if t.get("id") in disabled_tools:
+                return False
+            if not t.get("installed"):
+                return False
+            return bool(t.get("is_gui_app") or t.get("connected"))
+
+        connected_cnt = sum(1 for t in all_tools if _is_connected(t))
+        total_cnt = len(all_tools)
         cats = [
             ("all", vp_i18n.t("cat_all_count", n=total_cnt)),
+            ("connected", vp_i18n.t("cat_connected", n=connected_cnt)),
             ("agents", vp_i18n.t("cat_agents")),
             ("ide", vp_i18n.t("cat_ide")),
             ("cli", vp_i18n.t("cat_cli")),
@@ -8282,8 +8294,12 @@ class VoicePlayerApp:
             self._refresh_ai_badge()
 
         # Строим строки для каждого инструмента
-        all_tools = vp_integrations.detect()
-        filtered = [t for t in all_tools if cur_filter == "all" or t.get("category") == cur_filter]
+        if cur_filter == "connected":
+            filtered = [t for t in all_tools if _is_connected(t)]
+        elif cur_filter != "all":
+            filtered = [t for t in all_tools if t.get("category") == cur_filter]
+        else:
+            filtered = all_tools
 
         for row_i, tool in enumerate(filtered):
             tid = tool["id"]
