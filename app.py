@@ -1507,6 +1507,17 @@ def _synthesize_with_retries(text: str, rate: str, mp3_file: "Path", voice: str,
     raise RuntimeError(last_err)
 
 
+def _cleanup_rendered_parts(item: "Item", keep_path: Path):
+    """Удалить временные файлы кусков (.pXXX.mp3), сохранив список parts_done."""
+    for p in getattr(item, "parts_done", ()):
+        try:
+            pp = Path(p)
+            if pp != keep_path:
+                pp.unlink(missing_ok=True)
+        except Exception:
+            pass
+
+
 def render_audio_blocking(item: Item, rate: str = TTS_RATE, voice: str = TTS_VOICE,
                           lead: str = "", on_part=None) -> None:
     """Озвучить реплику. Длинную — частями: каждая часть короткая и не упирается в таймаут,
@@ -1592,6 +1603,8 @@ def render_audio_blocking(item: Item, rate: str = TTS_RATE, voice: str = TTS_VOI
                     out.write(Path(p).read_bytes())
             tmp.replace(mp3_file)
             item.audio_path = mp3_file
+            if on_part is None:
+                _cleanup_rendered_parts(item, mp3_file)
         except OSError as e:
             log_line(f"render concat [{item.id}]: {e}")
     else:
@@ -1690,20 +1703,28 @@ class MicRecorder:
     def __init__(self, samplerate=16000, channels=1):
         self.sr = samplerate; self.ch = channels
         self._frames = []; self._stream = None; self._rec = False
+        self.level: float = 0.0
 
     def start(self, device=None):
         import sounddevice as sd
-        self._frames = []; self._rec = True
+        import numpy as _np
+        self._frames = []; self._rec = True; self.level = 0.0
 
         def cb(indata, frames, t, status):
             if self._rec:
                 self._frames.append(indata.copy())
+                try:
+                    peak = float(_np.abs(indata).max()) if indata.size else 0.0
+                    self.level = min(1.0, max(peak * 2.2, self.level * 0.55))
+                except Exception:
+                    pass
         self._stream = sd.InputStream(samplerate=self.sr, channels=self.ch,
                                       dtype="float32", callback=cb, device=device)
         self._stream.start()
 
     def _stop_stream(self):
         self._rec = False
+        self.level = 0.0
         if self._stream is not None:
             try: self._stream.stop(); self._stream.close()
             except Exception: pass
@@ -4721,6 +4742,36 @@ class VoicePlayerApp:
         threading.Thread(target=worker, daemon=True).start()
 
     # ------------------ диктовка ответа голосом ------------------
+    def _tick_dictation_pill_wave(self):
+        """Отрисовка живой звуковой волны микрофона внутри плашки диктовки."""
+        self._dictate_pill_wave_after = None
+        w = getattr(self, "_dictate_pill", None)
+        if not getattr(self, "_recording_to_field", False) or w is None or not w.winfo_exists():
+            return
+        cv = getattr(w, "_pill_wave", None)
+        if cv is None or not cv.winfo_exists():
+            return
+        import math
+        lvl = float(getattr(getattr(self, "_recorder", None), "level", 0.0))
+        phase = (getattr(self, "_dictate_wave_phase", 0.0) + 0.55) % 628.0
+        self._dictate_wave_phase = phase
+        try:
+            cv.delete("all")
+            bars, bw, gap, h, x0 = 8, 3, 3, 18, 2
+            for i in range(bars):
+                env = 0.55 + 0.45 * math.sin((i + 0.5) / bars * math.pi)
+                osc = 0.4 + 0.6 * abs(math.sin(phase + i * 0.7))
+                amp = min(1.0, 0.12 + lvl * 0.88 * osc * env)
+                bh = max(3.0, amp * (h - 2))
+                x = x0 + i * (bw + gap)
+                y1, y2 = (h - bh) / 2.0, (h + bh) / 2.0
+                col = "#f87171" if lvl > 0.25 else "#ef4444"
+                cv.create_line(x + 1, y1, x + 1, y2, fill=col, width=bw, capstyle="round")
+        except Exception:
+            pass
+        if not self.stop_event.is_set() and getattr(self, "_recording_to_field", False):
+            self._dictate_pill_wave_after = self.root.after(50, self._tick_dictation_pill_wave)
+
     def _show_dictation_pill(self, text: str, accent: str = "#ef4444"):
         """Лёгкая плавающая плашка статуса диктовки поверх всех окон (без потери фокуса)."""
         after_id = getattr(self, "_dictate_pill_after", None)
@@ -4728,7 +4779,13 @@ class VoicePlayerApp:
             try: self.root.after_cancel(after_id)
             except Exception: pass
             self._dictate_pill_after = None
+        wave_after = getattr(self, "_dictate_pill_wave_after", None)
+        if wave_after:
+            try: self.root.after_cancel(wave_after)
+            except Exception: pass
+            self._dictate_pill_wave_after = None
         w = getattr(self, "_dictate_pill", None)
+        on_click = lambda _e: self._toggle_dictate() if self._recording_to_field else self._hide_dictation_pill()
         if w is None or not w.winfo_exists():
             w = tk.Toplevel(self.root)
             w.withdraw()
@@ -4740,14 +4797,16 @@ class VoicePlayerApp:
             frm.pack(fill="both", expand=True, padx=1, pady=1)
             dot = tk.Label(frm, text="●", fg=accent, bg="#18181b", font=("Segoe UI", 10, "bold"))
             dot.pack(side="left", padx=(0, 7))
+            wave_cv = tk.Canvas(frm, width=52, height=18, bg="#18181b", highlightthickness=0, bd=0)
             lbl = tk.Label(frm, text=text, fg="#f4f4f5", bg="#18181b",
                            font=("Segoe UI Semibold", 9), anchor="w")
             lbl.pack(side="left")
             w._pill_frm = frm
             w._pill_dot = dot
+            w._pill_wave = wave_cv
             w._pill_lbl = lbl
-            for widget in (w, frm, dot, lbl):
-                widget.bind("<Button-1>", lambda _e: self._toggle_dictate() if self._recording_to_field else self._hide_dictation_pill())
+            for widget in (w, frm, dot, wave_cv, lbl):
+                widget.bind("<Button-1>", on_click)
             self._dictate_pill = w
             if IS_WIN:
                 try:
@@ -4767,8 +4826,16 @@ class VoicePlayerApp:
             except Exception:
                 pass
         try:
+            if getattr(self, "_recording_to_field", False):
+                w._pill_wave.pack(side="left", padx=(0, 8), before=w._pill_lbl)
+                self._tick_dictation_pill_wave()
+            else:
+                w._pill_wave.pack_forget()
+        except Exception:
+            pass
+        try:
             w.update_idletasks()
-            pw = max(250, min(420, w._pill_frm.winfo_reqwidth() + 8))
+            pw = max(250, min(460, w._pill_frm.winfo_reqwidth() + 8))
             ph = 38
             sw, sh = w.winfo_screenwidth(), w.winfo_screenheight()
             x = max(0, (sw - pw) // 2)
@@ -4780,11 +4847,12 @@ class VoicePlayerApp:
             pass
 
     def _hide_dictation_pill(self):
-        after_id = getattr(self, "_dictate_pill_after", None)
-        if after_id:
-            try: self.root.after_cancel(after_id)
-            except Exception: pass
-            self._dictate_pill_after = None
+        for attr in ("_dictate_pill_after", "_dictate_pill_wave_after"):
+            aid = getattr(self, attr, None)
+            if aid:
+                try: self.root.after_cancel(aid)
+                except Exception: pass
+                setattr(self, attr, None)
         w = getattr(self, "_dictate_pill", None)
         if w is not None:
             try:
@@ -6816,6 +6884,11 @@ class VoicePlayerApp:
             finally:
                 if self._rendering_item_id == item.id:
                     self._rendering_item_id = None
+            if not item.audio_error and not item.more_parts and len(item.parts_done) > 1 and item.audio_path:
+                self._sync_parts(item)
+                with self._parts_lock:
+                    if item is not self._loaded_item or item.parts_fed >= len(item.parts_done):
+                        _cleanup_rendered_parts(item, Path(item.audio_path))
             if item.audio_error and not self._maybe_auto_retry(item):
                 item.more_parts = False                  # повторов не будет — отыграть то, что есть
             self.root.after(0, lambda it=item: self._on_render_done(it))
