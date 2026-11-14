@@ -145,6 +145,35 @@ def _read_clipboard_html() -> str:
         user32.CloseClipboard()
 
 
+def _read_clipboard_text() -> str:
+    """Потокобезопасное чтение текста (CF_UNICODETEXT) из буфера обмена Windows без Tk."""
+    if not IS_WIN:
+        return ""
+    from ctypes import wintypes
+    user32, kernel32 = ctypes.windll.user32, ctypes.windll.kernel32
+    CF_UNICODETEXT = 13
+    user32.GetClipboardData.argtypes = [wintypes.UINT]
+    user32.GetClipboardData.restype = wintypes.HANDLE
+    kernel32.GlobalLock.argtypes = [wintypes.HGLOBAL]
+    kernel32.GlobalLock.restype = wintypes.LPVOID
+    kernel32.GlobalUnlock.argtypes = [wintypes.HGLOBAL]
+    if not user32.IsClipboardFormatAvailable(CF_UNICODETEXT) or not user32.OpenClipboard(None):
+        return ""
+    try:
+        handle = user32.GetClipboardData(CF_UNICODETEXT)
+        if not handle:
+            return ""
+        ptr = kernel32.GlobalLock(handle)
+        if not ptr:
+            return ""
+        try:
+            return ctypes.wstring_at(ptr) or ""
+        finally:
+            kernel32.GlobalUnlock(handle)
+    finally:
+        user32.CloseClipboard()
+
+
 def _open_in_file_manager(path):
     """Открыть папку/файл в проводнике — кросс-платформенно (Windows/macOS/Linux)."""
     p = str(path)
@@ -752,12 +781,33 @@ AUDIO_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def cleanup_audio_cache(max_age_days: int = 7):
-    """Удалить из аудио-кэша файлы старше N дней — чтобы %TEMP% не рос бесконечно."""
+    """Удалить из аудио-кэша старые файлы и осиротевшие куски/временные артефакты."""
     try:
-        cutoff = time.time() - max_age_days * 86400
-        for f in AUDIO_DIR.glob("*.mp3"):
+        now = time.time()
+        cutoff = now - max_age_days * 86400
+        temp_cutoff = now - 3600       # 1 час для кусков .pXXX.mp3 и временных файлов рендера
+        merged_grace = now - 120       # 2 минуты после склейки общего {id}.mp3
+        part_re = re.compile(r"^(.+)\.p\d{3}\.mp3$", re.IGNORECASE)
+        for f in AUDIO_DIR.iterdir():
             try:
-                if f.stat().st_mtime < cutoff:
+                if not f.is_file():
+                    continue
+                name = f.name
+                low = name.lower()
+                mtime = f.stat().st_mtime
+                m_part = part_re.match(name)
+                if m_part:
+                    parent_mp3 = AUDIO_DIR / f"{m_part.group(1)}.mp3"
+                    if mtime < temp_cutoff or (parent_mp3.exists() and parent_mp3.stat().st_mtime < merged_grace):
+                        f.unlink()
+                    continue
+                if low.endswith((".tmp", ".in.txt", ".marks.json", ".err.txt", ".done")) or (
+                    low.startswith("dict_") and low.endswith(".wav")
+                ):
+                    if mtime < temp_cutoff:
+                        f.unlink()
+                    continue
+                if low.endswith((".mp3", ".wav")) and mtime < cutoff:
                     f.unlink()
             except Exception:
                 pass
@@ -1584,19 +1634,18 @@ def _get_whisper(size: str):
         return _whisper_holder["model"]
 
 
-def transcribe_file(path, model_size: str = WHISPER_MODEL_SIZE,
-                    language: Optional[str] = None, translate: bool = False,
-                    word_level: bool = False):
-    """Распознать речь из аудиофайла любого формата (ogg/mp3/m4a/wav/flac).
+def transcribe_array(audio, model_size: str = WHISPER_MODEL_SIZE,
+                     language: Optional[str] = None, translate: bool = False,
+                     word_level: bool = False):
+    """Распознать речь напрямую из 1D float32 16kHz numpy-массива (без записи WAV на диск).
     translate=True — переводит в английский. word_level=True — тайминги по словам.
     Возвращает (text, marks). Блокирующая."""
     import numpy as _np
-    import miniaudio as _ma
-    dec = _ma.decode_file(str(path), output_format=_ma.SampleFormat.FLOAT32,
-                          nchannels=1, sample_rate=16000)
-    audio = _np.array(dec.samples, dtype=_np.float32)
+    arr = _np.asarray(audio, dtype=_np.float32)
+    if arr.ndim > 1:
+        arr = arr.mean(axis=1)
     model = _get_whisper(model_size)
-    segments, info = model.transcribe(audio, language=(None if translate else language),
+    segments, info = model.transcribe(arr, language=(None if translate else language),
                                       task=("translate" if translate else "transcribe"),
                                       beam_size=1, vad_filter=True,
                                       word_timestamps=word_level)
@@ -1620,6 +1669,21 @@ def transcribe_file(path, model_size: str = WHISPER_MODEL_SIZE,
     return text.strip(), marks
 
 
+def transcribe_file(path, model_size: str = WHISPER_MODEL_SIZE,
+                    language: Optional[str] = None, translate: bool = False,
+                    word_level: bool = False):
+    """Распознать речь из аудиофайла любого формата (ogg/mp3/m4a/wav/flac).
+    translate=True — переводит в английский. word_level=True — тайминги по словам.
+    Возвращает (text, marks). Блокирующая."""
+    import numpy as _np
+    import miniaudio as _ma
+    dec = _ma.decode_file(str(path), output_format=_ma.SampleFormat.FLOAT32,
+                          nchannels=1, sample_rate=16000)
+    audio = _np.array(dec.samples, dtype=_np.float32)
+    return transcribe_array(audio, model_size=model_size, language=language,
+                            translate=translate, word_level=word_level)
+
+
 # ============================ ЗАПИСЬ С МИКРОФОНА ============================
 
 class MicRecorder:
@@ -1638,13 +1702,27 @@ class MicRecorder:
                                       dtype="float32", callback=cb, device=device)
         self._stream.start()
 
-    def stop(self, path) -> bool:
-        import numpy as np, wave
+    def _stop_stream(self):
         self._rec = False
         if self._stream is not None:
             try: self._stream.stop(); self._stream.close()
             except Exception: pass
             self._stream = None
+
+    def stop_array(self):
+        """Остановить запись и вернуть 1D float32 16kHz numpy-массив в памяти (или None, если пусто)."""
+        import numpy as np
+        self._stop_stream()
+        if not self._frames:
+            return None
+        data = np.concatenate(self._frames, axis=0)
+        if data.ndim > 1:
+            data = data.mean(axis=1)
+        return data.astype(np.float32, copy=False)
+
+    def stop(self, path) -> bool:
+        import numpy as np, wave
+        self._stop_stream()
         if not self._frames:
             return False
         data = np.concatenate(self._frames, axis=0)
@@ -2140,29 +2218,38 @@ def parse_message(raw: str) -> tuple[str, str, str]:
 
 def board_poll_loop(app: "VoicePlayerApp"):
     last_seen_ts: int = int(time.time() * 1000)
+    last_db_mtime: tuple[float, float] = (-1.0, -1.0)
+    wal_path = Path(str(DB_PATH) + "-wal")
     while not app.stop_event.is_set():
         try:
             if DB_PATH.exists():
-                conn = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True, timeout=2.0)
-                try:
-                    rows = conn.execute(
-                        "SELECT id, content, created_at FROM memory_entries "
-                        "WHERE namespace='team-chat' AND status='active' AND created_at > ? "
-                        "ORDER BY created_at ASC LIMIT 100",
-                        (last_seen_ts,),
-                    ).fetchall()
-                finally:
-                    conn.close()
-                for _id, content, created_at in rows:
-                    last_seen_ts = max(last_seen_ts, int(created_at))
-                    text = str(content or "")
-                    author, time_str, body = parse_message(text)
-                    app.enqueue(
-                        source="board", author=author,
-                        time_str=time_str or time.strftime("%H:%M", time.localtime(created_at / 1000)),
-                        date_str=time.strftime("%d.%m.%Y", time.localtime(created_at / 1000)),
-                        text=body,
-                    )
+                cur_mtime = (
+                    DB_PATH.stat().st_mtime,
+                    wal_path.stat().st_mtime if wal_path.exists() else 0.0,
+                )
+                if cur_mtime != last_db_mtime:
+                    conn = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True, timeout=2.0)
+                    try:
+                        rows = conn.execute(
+                            "SELECT id, content, created_at FROM memory_entries "
+                            "WHERE namespace='team-chat' AND status='active' AND created_at > ? "
+                            "ORDER BY created_at ASC LIMIT 100",
+                            (last_seen_ts,),
+                        ).fetchall()
+                    finally:
+                        conn.close()
+                    last_db_mtime = cur_mtime
+                    for _id, content, created_at in rows:
+                        last_seen_ts = max(last_seen_ts, int(created_at))
+                        text = str(content or "")
+                        author, time_str, body = parse_message(text)
+                        ts_val = time_str or time.strftime("%H:%M", time.localtime(created_at / 1000))
+                        ds_val = time.strftime("%d.%m.%Y", time.localtime(created_at / 1000))
+                        app._ui_after(
+                            lambda a=author, ts=ts_val, ds=ds_val, b=body: app.enqueue(
+                                source="board", author=a, time_str=ts, date_str=ds, text=b
+                            )
+                        )
         except Exception as e:
             log_line(f"board poll error: {e}")
         app.stop_event.wait(POLL_BOARD_INTERVAL_S)
@@ -2320,7 +2407,8 @@ class VoicePlayerApp:
         self._live_item = None
         self._live_lock = threading.Lock()
 
-        cleanup_audio_cache(7)              # %TEMP%: удалить mp3 старше недели
+        # чистим %TEMP% в фоне, чтобы тысячи кэш-файлов не тормозили старт окна
+        threading.Thread(target=cleanup_audio_cache, args=(7,), daemon=True, name="cache-clean").start()
 
         # приоритетная очередь рендера: (prio, seq, item). Меньший prio — раньше.
         # Это даёт «прогрев наперёд»: реплику, которую вот-вот слушать, рендерим без очереди.
@@ -2481,8 +2569,14 @@ class VoicePlayerApp:
                 live = [it for it in live if id(it) in recent or it.pinned or it.favorite]
             cur_id = (self.queue_items[self.current_idx].id
                       if 0 <= self.current_idx < len(self.queue_items) else "")
-            SESSION_FILE.write_text(json.dumps({"items": [rec(it) for it in live], "current": cur_id},
-                                               ensure_ascii=False), encoding="utf-8")
+            payload = json.dumps({"items": [rec(it) for it in live], "current": cur_id},
+                                 ensure_ascii=False)
+            if payload == getattr(self, "_last_saved_session_json", None) and SESSION_FILE.exists():
+                return
+            tmp = SESSION_FILE.with_suffix(".json.tmp")
+            tmp.write_text(payload, encoding="utf-8")
+            tmp.replace(SESSION_FILE)
+            self._last_saved_session_json = payload
         except Exception as e:
             log_line(f"save session error: {e}")
 
@@ -4627,40 +4721,168 @@ class VoicePlayerApp:
         threading.Thread(target=worker, daemon=True).start()
 
     # ------------------ диктовка ответа голосом ------------------
+    def _show_dictation_pill(self, text: str, accent: str = "#ef4444"):
+        """Лёгкая плавающая плашка статуса диктовки поверх всех окон (без потери фокуса)."""
+        after_id = getattr(self, "_dictate_pill_after", None)
+        if after_id:
+            try: self.root.after_cancel(after_id)
+            except Exception: pass
+            self._dictate_pill_after = None
+        w = getattr(self, "_dictate_pill", None)
+        if w is None or not w.winfo_exists():
+            w = tk.Toplevel(self.root)
+            w.withdraw()
+            w.overrideredirect(True)
+            try: w.attributes("-topmost", True)
+            except Exception: pass
+            w.configure(bg="#27272a")
+            frm = tk.Frame(w, bg="#18181b", padx=12, pady=6)
+            frm.pack(fill="both", expand=True, padx=1, pady=1)
+            dot = tk.Label(frm, text="●", fg=accent, bg="#18181b", font=("Segoe UI", 10, "bold"))
+            dot.pack(side="left", padx=(0, 7))
+            lbl = tk.Label(frm, text=text, fg="#f4f4f5", bg="#18181b",
+                           font=("Segoe UI Semibold", 9), anchor="w")
+            lbl.pack(side="left")
+            w._pill_frm = frm
+            w._pill_dot = dot
+            w._pill_lbl = lbl
+            for widget in (w, frm, dot, lbl):
+                widget.bind("<Button-1>", lambda _e: self._toggle_dictate() if self._recording_to_field else self._hide_dictation_pill())
+            self._dictate_pill = w
+            if IS_WIN:
+                try:
+                    w.update_idletasks()
+                    hwnd_p = self._top_hwnd(w)
+                    if hwnd_p:
+                        u32 = ctypes.windll.user32
+                        style = u32.GetWindowLongW(hwnd_p, -20)
+                        # WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW — не красть фокус у активного окна при показе/клике
+                        u32.SetWindowLongW(hwnd_p, -20, style | 0x08000000 | 0x00000080)
+                except Exception:
+                    pass
+        else:
+            try:
+                w._pill_dot.configure(fg=accent)
+                w._pill_lbl.configure(text=text)
+            except Exception:
+                pass
+        try:
+            w.update_idletasks()
+            pw = max(250, min(420, w._pill_frm.winfo_reqwidth() + 8))
+            ph = 38
+            sw, sh = w.winfo_screenwidth(), w.winfo_screenheight()
+            x = max(0, (sw - pw) // 2)
+            y = max(0, sh - 96)
+            w.geometry(f"{pw}x{ph}+{x}+{y}")
+            w.deiconify()
+            w.lift()
+        except Exception:
+            pass
+
+    def _hide_dictation_pill(self):
+        after_id = getattr(self, "_dictate_pill_after", None)
+        if after_id:
+            try: self.root.after_cancel(after_id)
+            except Exception: pass
+            self._dictate_pill_after = None
+        w = getattr(self, "_dictate_pill", None)
+        if w is not None:
+            try:
+                if w.winfo_exists():
+                    w.destroy()
+            except Exception:
+                pass
+            self._dictate_pill = None
+
+    def _paste_to_external_window(self, hwnd: int):
+        """Вернуть фокус в исходное окно и имитировать Ctrl+V для автовставки диктовки."""
+        if not IS_WIN or not hwnd:
+            return
+        try:
+            u32 = ctypes.windll.user32
+            if not u32.IsWindow(hwnd):
+                return
+            if u32.GetForegroundWindow() != hwnd:
+                fg = u32.GetForegroundWindow()
+                fg_tid = u32.GetWindowThreadProcessId(fg, None) if fg else 0
+                tgt_tid = u32.GetWindowThreadProcessId(hwnd, None)
+                cur_tid = ctypes.windll.kernel32.GetCurrentThreadId()
+                if tgt_tid and tgt_tid != cur_tid:
+                    u32.AttachThreadInput(cur_tid, tgt_tid, True)
+                if fg_tid and fg_tid not in (cur_tid, tgt_tid):
+                    u32.AttachThreadInput(cur_tid, fg_tid, True)
+                u32.SetForegroundWindow(hwnd)
+                if fg_tid and fg_tid not in (cur_tid, tgt_tid):
+                    u32.AttachThreadInput(cur_tid, fg_tid, False)
+                if tgt_tid and tgt_tid != cur_tid:
+                    u32.AttachThreadInput(cur_tid, tgt_tid, False)
+                time.sleep(0.03)
+            KEYEVENTF_KEYUP = 0x0002
+            for vk, sc in ((0x10, 0x2A), (0xA0, 0x2A), (0xA1, 0x36),
+                           (0x12, 0x38), (0xA4, 0x38), (0xA5, 0x38),
+                           (0x5B, 0), (0x5C, 0)):
+                u32.keybd_event(vk, sc, KEYEVENTF_KEYUP, 0)
+            time.sleep(0.015)
+            u32.keybd_event(0x11, 0x1D, 0, 0)                  # Ctrl down
+            time.sleep(0.015)
+            u32.keybd_event(0x56, 0x2F, 0, 0)                  # V down
+            time.sleep(0.03)
+            u32.keybd_event(0x56, 0x2F, KEYEVENTF_KEYUP, 0)    # V up
+            time.sleep(0.015)
+            u32.keybd_event(0x11, 0x1D, KEYEVENTF_KEYUP, 0)    # Ctrl up
+        except Exception as e:
+            log_line(f"dictate auto-paste error: {e}")
+
     def _toggle_dictate(self):
         if not (_STREAM_OK and _ensure_whisper()):
             messagebox.showerror(APP_NAME, "Нужны аудио-движок и распознавание (whisper)."); return
         if not self._recording and not self._recording_to_field:
+            self._dictate_target_hwnd = 0
+            if IS_WIN:
+                try:
+                    fg = ctypes.windll.user32.GetForegroundWindow()
+                    own = {self._top_hwnd(), self.root.winfo_id()}
+                    if self.mini is not None and self.mini.winfo_exists():
+                        own.add(self._top_hwnd(self.mini))
+                        own.add(self.mini.winfo_id())
+                    if fg and fg not in own:
+                        self._dictate_target_hwnd = fg
+                except Exception:
+                    pass
             try:
                 self._recorder.start()
                 self._recording_to_field = True
                 self.btn_dictate.configure(text="⏺ Стоп")
                 self._set_status("диктуй ответ… ещё раз — стоп", ok=True)
-                self._notify("Голосовая диктовка", "Говорите в микрофон... Нажмите Ctrl+Alt+D или кнопку ещё раз для завершения")
+                self._show_dictation_pill("🎤 Слушаю… (нажмите хоткей для стопа)", "#ef4444")
             except Exception as e:
                 messagebox.showerror(APP_NAME, f"Не удалось включить запись:\n{e}")
         elif self._recording_to_field:
             self._recording_to_field = False
             self.btn_dictate.configure(text="🎤 " + vp_i18n.t("dictate"))
-            path = AUDIO_DIR / f"dict_{uuid4().hex[:8]}.wav"
             try:
-                ok = self._recorder.stop(path)
+                audio_np = self._recorder.stop_array()
             except Exception as e:
+                self._hide_dictation_pill()
                 messagebox.showerror(APP_NAME, f"Ошибка записи:\n{e}"); return
-            if not ok:
+            if audio_np is None or len(audio_np) < 1600:
+                self._hide_dictation_pill()
                 self._set_status("пусто", ok=False); return
             self._set_status("распознаю продиктованное…", ok=True)
+            self._show_dictation_pill("⏳ Распознаю речь…", "#f59e0b")
 
             def worker():
                 try:
-                    text, _ = transcribe_file(path, self._model_size)
+                    text, _ = transcribe_array(audio_np, self._model_size)
                 except Exception as e:
                     log_line(f"dictate transcribe error: {e}")
                     text = ""
-                self.root.after(0, lambda: self._dictate_done(text))
-            threading.Thread(target=worker, daemon=True).start()
+                self._ui_after(lambda t=text: self._dictate_done(t))
+            threading.Thread(target=worker, daemon=True, name="dictate-whisper").start()
 
     def _dictate_done(self, text):
+        target_hwnd = getattr(self, "_dictate_target_hwnd", 0)
+        self._dictate_target_hwnd = 0
         if text:
             cur = self.tts_input.get("1.0", "end").strip()
             self.tts_input.delete("1.0", "end")
@@ -4668,12 +4890,23 @@ class VoicePlayerApp:
             try:
                 self.root.clipboard_clear()
                 self.root.clipboard_append(text)
+                self.root.update_idletasks()
             except Exception:
                 pass
-            self._set_status("продиктовано — скопировано в буфер (Ctrl+V)", ok=True)
-            self._notify("Голосовой ввод завершён", f"Текст скопирован в буфер: {text[:80]}")
+            if IS_WIN and target_hwnd:
+                self.root.after(45, lambda h=target_hwnd: threading.Thread(
+                    target=self._paste_to_external_window, args=(h,), daemon=True, name="dictate-paste"
+                ).start())
+                self._set_status("продиктовано — вставлено в активное окно", ok=True)
+                self._show_dictation_pill("✅ Готово — вставлено", "#22c55e")
+            else:
+                self._set_status("продиктовано — скопировано в буфер (Ctrl+V)", ok=True)
+                self._show_dictation_pill("✅ Готово — в буфере", "#22c55e")
+            self._dictate_pill_after = self.root.after(1400, self._hide_dictation_pill)
         else:
             self._set_status("не распознал — повтори", ok=False)
+            self._show_dictation_pill("⚠ Не расслышал", "#ef4444")
+            self._dictate_pill_after = self.root.after(1400, self._hide_dictation_pill)
 
     def _field_text(self):
         return self.tts_input.get("1.0", "end").strip()
@@ -5676,10 +5909,15 @@ class VoicePlayerApp:
 
         while len(self._row_wave_canvases) < len(rendering_rows):
             cv = tk.Canvas(self.tree, height=5, highlightthickness=0, bd=0, cursor="hand2")
+            cv._row_iid = None
+            cv.bind("<Button-1>", lambda _e, c=cv: (self.tree.selection_set(c._row_iid), self._on_tree_select()) if c._row_iid else None)
+            cv.bind("<Double-Button-1>", lambda _e, c=cv: (self.tree.selection_set(c._row_iid), self._play_selected()) if c._row_iid else None)
+            self._bind_context(cv, lambda _e, c=cv: self._show_context_menu_for_row(_e, c._row_iid) if c._row_iid else None)
             self._row_wave_canvases.append(cv)
 
         for idx, (it, iid, rx, ry, rw, rh, active, is_sel) in enumerate(rendering_rows):
             cv = self._row_wave_canvases[idx]
+            cv._row_iid = iid
             row_bg = self.col_sel if is_sel else self.col_panel
             cw = max(16, rw - 8)
             ch = 7
@@ -5691,14 +5929,12 @@ class VoicePlayerApp:
                     cv, cw, ch, self._wave_phase + idx * 0.7,
                     row_bg, self.col_hairline, self.col_signal, active=active
                 )
-                cv.bind("<Button-1>", lambda _e, row_iid=iid: (self.tree.selection_set(row_iid), self._on_tree_select()))
-                cv.bind("<Double-Button-1>", lambda _e, row_iid=iid: (self.tree.selection_set(row_iid), self._play_selected()))
-                self._bind_context(cv, lambda _e, row_iid=iid: self._show_context_menu_for_row(_e, row_iid))
             except Exception:
                 pass
 
         for cv in self._row_wave_canvases[len(rendering_rows):]:
             try:
+                cv._row_iid = None
                 cv.place_forget()
             except Exception:
                 pass
@@ -5711,6 +5947,17 @@ class VoicePlayerApp:
             self._hide_row_waves()
             self._draw_seek()
             self._update_mini()
+            return
+        hidden = getattr(self, "_in_tray", False)
+        if not hidden:
+            try:
+                hidden = not self.root.winfo_viewable()
+            except Exception:
+                pass
+        if hidden:
+            if self.mini is not None and self.mini.winfo_exists():
+                self._update_mini()
+            self._wave_anim_after = self.root.after(250, self._wave_anim_tick)
             return
         self._wave_phase = (self._wave_phase + 0.14) % 628.0
         self._update_row_waves()
@@ -5876,14 +6123,34 @@ class VoicePlayerApp:
                 self._seek_idle = False
                 dur = self.player.duration(); pos = self.player.position()
                 if dur > 0:
-                    self._seek_frac = min(1.0, pos / dur)
-                    self._draw_seek(self._seek_frac)
-                    self.lbl_pos.configure(text=self._fmt_time(pos))
-                    self.lbl_dur.configure(text=self._fmt_time(dur))
+                    frac = min(1.0, pos / dur)
+                    pos_sec = int(pos)
+                    dur_sec = int(dur)
+                    gen = getattr(self, "_loaded_gen", 0)
+                    if (self.player.is_paused() and not self._any_rendering()
+                            and gen == getattr(self, "_last_drawn_gen", -1)
+                            and abs(frac - getattr(self, "_last_drawn_seek_frac", -1.0)) < 0.0005
+                            and pos_sec == getattr(self, "_last_drawn_pos_sec", -1)
+                            and dur_sec == getattr(self, "_last_drawn_dur_sec", -1)):
+                        return
+                    self._seek_frac = frac
+                    self._last_drawn_seek_frac = frac
+                    self._last_drawn_gen = gen
+                    self._draw_seek(frac)
+                    if pos_sec != getattr(self, "_last_drawn_pos_sec", -1):
+                        self._last_drawn_pos_sec = pos_sec
+                        self.lbl_pos.configure(text=self._fmt_time(pos))
+                    if dur_sec != getattr(self, "_last_drawn_dur_sec", -1):
+                        self._last_drawn_dur_sec = dur_sec
+                        self.lbl_dur.configure(text=self._fmt_time(dur))
                     self._highlight_speaking(pos)
             else:
                 if not getattr(self, "_seek_idle", False):
                     self._seek_frac = 0.0; self._draw_seek(0.0)
+                    self._last_drawn_seek_frac = -1.0
+                    self._last_drawn_pos_sec = -1
+                    self._last_drawn_dur_sec = -1
+                    self._last_drawn_gen = -1
                     self.lbl_pos.configure(text="0:00"); self.lbl_dur.configure(text="0:00")
                     self._seek_idle = True
         except Exception:
@@ -7282,26 +7549,38 @@ class VoicePlayerApp:
                 pass
         self._text_body_offset = 0
         txt = err = ""
+        inc_reas = bool(getattr(self, "var_ai_intermediate_reasoning", None) and self.var_ai_intermediate_reasoning.get())
         if item:
-            # привести к новому формату (таблицы → читаемые строки) — чинит и старые реплики;
-            # для уже-чистых новых функция идемпотентна и ничего не меняет
-            try:
-                fixed = _clean_for_tts(item.raw_text)
-                if fixed and fixed != item.text:
-                    item.text = fixed
-                    item.marks = []; item.word_marks = []   # тайминги устарели — подсветка off до перерендера
-            except Exception:
-                pass
             stamp = " / ".join(p for p in (item.date_str, item.time_str) if p)
             header = f"[{self._disp_author(item.author)}" + (f" · {stamp}" if stamp else "") + "]\n"
             prefix = header + "\n"
             self._text_body_offset = len(prefix)     # с этого символа начинается тело реплики
             err = f"\n\n⚠ {item.audio_error}" if item.audio_error else ""
             txt = prefix
-        key = (id(item), item.text if item else "", getattr(item, "prompt", "") if item else "", txt, err if item else "", self.col_panel, self.col_ink)
+        key = (
+            id(item),
+            item.raw_text if item else "",
+            inc_reas,
+            getattr(item, "prompt", "") if item else "",
+            txt,
+            err,
+            self.col_panel,
+            self.col_ink,
+        )
         if key == getattr(self, "_panel_key", None):  # та же реплика — не сбрасывать прокрутку и выделение
             return
         self._panel_key = key
+        if item:
+            # привести к новому формату (таблицы → читаемые строки) — чинит и старые реплики;
+            # для уже-чистых новых функция идемпотентна и ничего не меняет
+            try:
+                fixed = _clean_for_tts(item.raw_text, include_reasoning=inc_reas)
+                if fixed and fixed != item.text:
+                    item.text = fixed
+                    if not item.audio_ready and not item.parts_done:
+                        item.marks = []; item.word_marks = []   # тайминги устарели — подсветка off до перерендера
+            except Exception:
+                pass
         for w in getattr(self, "_panel_widgets", []):
             w.destroy()
         self._panel_widgets = []
@@ -7311,7 +7590,9 @@ class VoicePlayerApp:
         self._panel_segs = []
         if item:
             try:
-                segs = vp_layout.document_segments(item.text, item.raw_text, _clean_for_tts)
+                segs = vp_layout.document_segments(
+                    item.text, item.raw_text, lambda s: _clean_for_tts(s, include_reasoning=inc_reas)
+                )
             except Exception as e:
                 log_line(f"panel layout error: {e}")
                 segs = vp_layout._plain_fallback(item.text)
@@ -8765,6 +9046,9 @@ class VoicePlayerApp:
             md = html_to_markdown(html)
             if find_tables(md):
                 return md
+        if IS_WIN:
+            txt = _read_clipboard_text()
+            return normalize_tables(txt) if txt else ""
         try:
             return normalize_tables(self.root.clipboard_get())
         except Exception:
