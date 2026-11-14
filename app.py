@@ -2401,7 +2401,6 @@ class VoicePlayerApp:
         self._ensure_ai_hooks_connected()
         self._poll_codex_inbox()
         threading.Thread(target=self._watcher_poll_loop, daemon=True, name="ai-watchers").start()
-        self.root.after(600, lambda: self._pull_recent_ai(limit_per_source=5, silent=True))
         self._tick()
         self.root.after(300, self._restore_sashes)   # вернуть размеры секций
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
@@ -6464,6 +6463,7 @@ class VoicePlayerApp:
             text="Очередь очищена." + (" Закреплённые сохранены." if kept else " Ждём новых реплик…"))
         self._update_text_panel()
         self._render_list()
+        self._save_session()
 
     def _spawn_render_workers(self, workers: int):
         for i in range(workers):
@@ -8202,7 +8202,7 @@ class VoicePlayerApp:
                         command=self._on_ai_reasoning_toggle).pack(anchor="w", pady=(0, 6))
 
         # Панель категорий (быстрые фильтры)
-        cat_bar = ttk.Frame(top_box, style="Panel.TFrame")
+        cat_bar = _wrap_bar(ttk.Frame(top_box, style="Panel.TFrame"))
         cat_bar.pack(fill="x", pady=(0, 6))
 
         all_tools = vp_integrations.detect() if hasattr(vp_integrations, "detect") else []
