@@ -10,6 +10,7 @@ This document defines the architectural rules, watcher mechanics, deployment bou
 * **Public Mirror**: `C:\dev\voice-player-public` (branch: `main`).
 * **Installed Desktop Runtime**: `C:\Users\tiko_\AppData\Local\Programs\VoicePlayer\versions\1.2.5\`.
 * **STRICT PROHIBITION**: NEVER touch or edit files in `C:\dev\pro` (this is a separate project).
+* **NO HEADLESS GUI SPAWN**: NEVER launch `app.py` or `launch.pyw` via background agent subshell (`run_command` / `Start-Process`). Agent subshells run in non-interactive sessions without display rights. Doing so locks port 3737 with an invisible headless process that plays audio but cannot show a window on the user's monitor, blocking the user's desktop shortcut from opening. The user must always launch the desktop GUI directly.
 * **Multi-Target Sync**: When fixing or updating files (`app.py`, `vp_watchers.py`, `vp_integrations.py`, `vp_i18n.py`, etc.):
   1. Make and test changes in `D:\AI\projects\pro\voice-player`.
   2. Copy updated files to `C:\dev\voice-player-public` and commit/push.
