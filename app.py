@@ -1061,9 +1061,14 @@ def _md_tables_to_text(t: str) -> str:
     return "\n".join(out)
 
 
-def _clean_for_tts(s: str) -> str:
+def _clean_for_tts(s: str, include_reasoning: bool = False) -> str:
     import re
-    t = normalize_tables(s)                        # таблицы из Excel, терминала, одной строкой
+    t = s
+    if not include_reasoning:
+        t = re.sub(r"(?is)<think>[\s\S]*?</think>", " ", t)
+    else:
+        t = re.sub(r"(?i)</?think>", "\n", t)
+    t = normalize_tables(t)                        # таблицы из Excel, терминала, одной строкой
     t = re.sub(r"```[\s\S]*?```", " ", t)
     t = re.sub(r"`[^`]*`", " ", t)
     t = _md_tables_to_text(t)                      # таблицы → читаемые строки (до удаления |)
@@ -2245,6 +2250,7 @@ class VoicePlayerApp:
         self.var_autoscroll = tk.BooleanVar(value=self.prefs.get("autoscroll", True))
         self.var_close_to_tray = tk.BooleanVar(value=self.prefs.get("close_to_tray", True))
         self.var_newest_first = tk.BooleanVar(value=self.prefs.get("newest_first", True))
+        self.var_ai_intermediate_reasoning = tk.BooleanVar(value=self.prefs.get("ai_intermediate_reasoning", False))
         self.var_model     = tk.StringVar(value=self.prefs.get("whisper_model", WHISPER_MODEL_SIZE))
         self.var_translate = tk.BooleanVar(value=self.prefs.get("translate_en", False))
         # копии для фоновых потоков: читать tk-переменные не из главного потока нельзя
@@ -2387,7 +2393,11 @@ class VoicePlayerApp:
         self.root.after(4500, self._trigger_sponsor_check)
         self.root.after(45000, self._maybe_show_support_reminder)
 
-        self.watchers = vp_watchers.Watchers(Path.home() / ".voice-player" / "watchers.json", log=log_line)
+        self.watchers = vp_watchers.Watchers(
+            Path.home() / ".voice-player" / "watchers.json",
+            log=log_line,
+            options={"ai_intermediate_reasoning": self.var_ai_intermediate_reasoning.get()}
+        )
         self._ensure_ai_hooks_connected()
         self._poll_codex_inbox()
         threading.Thread(target=self._watcher_poll_loop, daemon=True, name="ai-watchers").start()
@@ -2575,6 +2585,7 @@ class VoicePlayerApp:
                 "autoscroll": self.var_autoscroll.get(),
                 "close_to_tray": self.var_close_to_tray.get() if hasattr(self, "var_close_to_tray") else True,
                 "newest_first": self.var_newest_first.get(),
+                "ai_intermediate_reasoning": self.var_ai_intermediate_reasoning.get(),
                 "lang": self.var_lang.get() if hasattr(self, "var_lang") else "en",
                 "whisper_model": self.var_model.get(),
                 "translate_en": self.var_translate.get(),
@@ -5120,6 +5131,10 @@ class VoicePlayerApp:
         ttk.Checkbutton(t1, text=vp_i18n.t("opt_newest_first"), variable=self.var_newest_first,
                         command=lambda: (self._save_prefs(), self._render_list())).grid(
             row=50, column=0, columnspan=2, sticky="w", pady=(10, 0))
+        ttk.Checkbutton(t1, text="🧠 " + vp_i18n.t("opt_ai_intermediate_reasoning"),
+                        variable=self.var_ai_intermediate_reasoning,
+                        command=self._on_ai_reasoning_toggle).grid(
+            row=51, column=0, columnspan=2, sticky="w", pady=(4, 0))
         ttk.Label(t1, text=vp_i18n.t("opt_sleep_timer")).grid(row=6, column=0, sticky="w", pady=(10, 0))
         off_lbl = vp_i18n.t("off")
         m_lbl = vp_i18n.t("min_short")
@@ -5435,6 +5450,16 @@ class VoicePlayerApp:
             self._set_status("авто-озвучка буфера включена — копируй текст", ok=True)
         else:
             self._set_status("авто-озвучка буфера выключена", ok=True)
+
+    def _on_ai_reasoning_toggle(self):
+        val = bool(self.var_ai_intermediate_reasoning.get())
+        self.prefs["ai_intermediate_reasoning"] = val
+        self._save_prefs()
+        if hasattr(self, "watchers"):
+            self.watchers.set_options({"ai_intermediate_reasoning": val})
+        msg = ("включена озвучка промежуточных шагов и размышлений ИИ" if val
+               else "озвучиваются только итоговые ответы ИИ")
+        self._set_status(msg, ok=True)
 
     def _detect_active_window_author(self) -> str:
         """Определить автора по заголовку активного окна Windows в момент копирования."""
@@ -8168,7 +8193,12 @@ class VoicePlayerApp:
         ttk.Checkbutton(top_box,
                         text="📋 " + vp_i18n.t("opt_autoclip") + " (" + vp_i18n.t("autoclip_ai_hint") + ")",
                         variable=self.var_autoclip,
-                        command=self._on_autoclip).pack(anchor="w", pady=(0, 6))
+                        command=self._on_autoclip).pack(anchor="w", pady=(0, 4))
+
+        ttk.Checkbutton(top_box,
+                        text="🧠 " + vp_i18n.t("opt_ai_intermediate_reasoning"),
+                        variable=self.var_ai_intermediate_reasoning,
+                        command=self._on_ai_reasoning_toggle).pack(anchor="w", pady=(0, 6))
 
         # Панель категорий (быстрые фильтры)
         cat_bar = ttk.Frame(top_box, style="Panel.TFrame")

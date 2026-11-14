@@ -849,9 +849,11 @@ class DeepSeekWatcher:
     """Следит за свежими сессиями DeepSeek Harness (~/.dsh)."""
     source = "deepseek"
 
-    def __init__(self, home: Optional[Path] = None, state: Optional[dict] = None):
+    def __init__(self, home: Optional[Path] = None, state: Optional[dict] = None,
+                 options: Optional[dict] = None):
         self.home = Path(home or Path.home())
         self.state = state if state is not None else {}
+        self.options = options if options is not None else {}
         self.dsh_dir = self._find_dsh_dir()
         self._cache: dict = {}
 
@@ -992,7 +994,17 @@ class DeepSeekWatcher:
 
                     key = f"dsh:{sess_id}:{tnum}"
                     parts = t.get("text_parts", [])
-                    resp = "\n\n".join(parts).strip()
+                    if not parts:
+                        if t.get("completed"):
+                            seen.add(key)
+                        continue
+
+                    include_reasoning = bool(self.options.get("ai_intermediate_reasoning", False))
+                    if include_reasoning:
+                        resp = "\n\n".join(parts).strip()
+                    else:
+                        resp = parts[-1].strip()
+
                     if not resp:
                         if t.get("completed"):
                             seen.add(key)
@@ -1086,7 +1098,14 @@ class DeepSeekWatcher:
                 turns, title = self._parse_zstd_session(zpath)
                 for tnum in sorted(turns.keys(), reverse=True):
                     t = turns[tnum]
-                    resp = "\n\n".join(t.get("text_parts", [])).strip()
+                    parts = t.get("text_parts", [])
+                    if not parts:
+                        continue
+                    include_reasoning = bool(self.options.get("ai_intermediate_reasoning", False))
+                    if include_reasoning:
+                        resp = "\n\n".join(parts).strip()
+                    else:
+                        resp = parts[-1].strip()
                     if not resp:
                         continue
                     prompt = (t.get("prompt") or "").strip()
@@ -1355,9 +1374,11 @@ class Watchers:
     """Держит наблюдателей и их позиции; ``poll()`` безопасно вызывать из фонового потока."""
 
     def __init__(self, state_file: Path, home: Optional[Path] = None,
-                 log: Callable[[str], None] = lambda _m: None):
+                 log: Callable[[str], None] = lambda _m: None,
+                 options: Optional[dict] = None):
         self.state_file = Path(state_file)
         self.log = log
+        self.options = dict(options or {})
         home = Path(home or Path.home())
         try:
             self.state = json.loads(self.state_file.read_text(encoding="utf-8"))
@@ -1372,10 +1393,16 @@ class Watchers:
             "aider": AiderWatcher(home, self.state.setdefault("aider", {})),
             "terminal": TerminalWatcher(home / ".voice-player", self.state.setdefault("terminal", {})),
             "ollama": OllamaWatcher(home, self.state.setdefault("ollama", {})),
-            "deepseek": DeepSeekWatcher(home, self.state.setdefault("deepseek", {})),
+            "deepseek": DeepSeekWatcher(home, self.state.setdefault("deepseek", {}), options=self.options),
             "kimi": KimiWatcher(home, self.state.setdefault("kimi", {})),
         }
         self._errors: dict = {}
+
+    def set_options(self, options: dict) -> None:
+        self.options.update(options)
+        for w in self.items.values():
+            if hasattr(w, "options") and isinstance(w.options, dict):
+                w.options.update(options)
 
     def available(self) -> dict:
         return {k: w.available() for k, w in self.items.items()}

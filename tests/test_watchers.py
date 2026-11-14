@@ -261,8 +261,8 @@ class CodexAndAntigravityWatchers(unittest.TestCase):
         self.assertEqual(len(items), 1)
         self.assertEqual(items[0]["source"], "deepseek")
         self.assertEqual(items[0]["prompt"], "Расскажи подробнее")
-        self.assertIn("Часть 1: анализ.", items[0]["text"])
-        self.assertIn("Часть 2: выводы.", items[0]["text"])
+        # По умолчанию: только итоговый ответ (последняя часть)
+        self.assertEqual(items[0]["text"], "Часть 2: выводы.")
 
         # 3. Ход в процессе генерации (без turn/end) не должен отдаваться преждевременно
         events.extend([
@@ -281,8 +281,14 @@ class CodexAndAntigravityWatchers(unittest.TestCase):
         _write_zstd_events(events)
         items3 = watcher.poll(now=time.time())
         self.assertEqual(len(items3), 1)
-        self.assertIn("Начало ответа (шаг 1)...", items3[0]["text"])
-        self.assertIn("Итоговое заключение (шаг 2).", items3[0]["text"])
+        # По умолчанию отдаётся только финал
+        self.assertEqual(items3[0]["text"], "Итоговое заключение (шаг 2).")
+
+        # 4. Если включена опция промежуточных размышлений — отдаются все части
+        watcher_all = vw.DeepSeekWatcher(home=self.home, options={"ai_intermediate_reasoning": True})
+        recent_all = watcher_all.fetch_recent(limit=2)
+        self.assertIn("Часть 1: анализ.", recent_all[1]["text"])
+        self.assertIn("Часть 2: выводы.", recent_all[1]["text"])
 
     def test_kimi_watcher(self):
         wire_dir = self.home / ".kimi-desktop" / "daimon-share" / "daimon" / "runtime" / "kimi-code" / "home" / "sessions" / "s1" / "c1" / "agents" / "main"
