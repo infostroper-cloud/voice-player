@@ -235,15 +235,16 @@ class CodexWatcher:
                 continue
             rec = rfiles.get(path)
             if rec is None:
+                is_stale = (now - st.st_mtime) > 60
                 rfiles[path] = rec = {
-                    "off": st.st_size if first_run else 0,
+                    "off": st.st_size if (first_run or is_stale) else 0,
                     "session": "",
                     "originator": "",
                     "title": "",
                     "q": "",
                     "subagent": False,
                 }
-                if first_run:
+                if first_run or is_stale:
                     continue
             if st.st_size < rec.get("off", 0):
                 rec["off"] = 0
@@ -403,13 +404,14 @@ class AntigravityWatcher:
             rec = files.get(path)
             if rec is None:
                 title = self._peek_title(path)
+                is_stale = (now - st.st_mtime) > 60
                 files[path] = rec = {
-                    "off": st.st_size if first_run else 0,
+                    "off": st.st_size if (first_run or is_stale) else 0,
                     "user": False,
                     "q": "",
                     "title": title,
                 }
-                if first_run:
+                if first_run or is_stale:
                     continue
             if not rec.get("title"):
                 rec["title"] = self._peek_title(path)

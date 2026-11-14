@@ -2468,13 +2468,15 @@ class VoicePlayerApp:
     def _restore_session(self):
         """Восстановить очередь прошлого сеанса. Если файла сессии нет — легаси-режим
         (только закреплённые/избранные из старого формата)."""
+        if not SESSION_FILE.exists():
+            self._load_saved_items()
+            return
         try:
             data = json.loads(SESSION_FILE.read_text(encoding="utf-8"))
             recs = data.get("items", [])
         except Exception:
             recs = []
         if not recs:
-            self._load_saved_items()
             return
         cur_id = data.get("current", "")
         to_render = []
