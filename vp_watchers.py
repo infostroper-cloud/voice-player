@@ -636,6 +636,25 @@ class ClineWatcher:
             self.state["seen"] = list(seen)[-100:]
         return out
 
+    def mark_all_seen(self) -> None:
+        dirs = self._task_dirs()
+        seen = set(self.state.get("seen") or [])
+        for tdir in dirs[:16]:
+            msg_file = tdir / "ui_messages.json"
+            if not msg_file.exists():
+                continue
+            try:
+                st = msg_file.stat()
+                data = json.loads(msg_file.read_text(encoding="utf-8", errors="replace"))
+                if isinstance(data, list):
+                    for m in data:
+                        ts = m.get("ts") or int(st.st_mtime * 1000)
+                        seen.add(f"cline:{tdir.name}:{ts}")
+            except Exception:
+                pass
+        self.state["seen"] = list(seen)[-2000:]
+        self.state["init"] = True
+
 
 # ------------------------------------------------------------------ Aider
 
@@ -700,6 +719,15 @@ class AiderWatcher:
             "key": f"aider:{int(now*1000)}",
         }]
 
+    def mark_all_seen(self) -> None:
+        hist_file = self.home / ".aider.chat.history.md"
+        if hist_file.exists():
+            try:
+                self.state["off"] = hist_file.stat().st_size
+            except OSError:
+                pass
+        self.state["init"] = True
+
 
 # ------------------------------------------------------------------ Terminal
 
@@ -752,6 +780,15 @@ class TerminalWatcher:
             "text": text,
             "key": f"term:{int(now*1000)}",
         }]
+
+    def mark_all_seen(self) -> None:
+        log_file = self.home / "terminal.log"
+        if log_file.exists():
+            try:
+                self.state["off"] = log_file.stat().st_size
+            except OSError:
+                pass
+        self.state["init"] = True
 
 
 # ------------------------------------------------------------------ Ollama
@@ -854,6 +891,23 @@ class OllamaWatcher:
             pass
         return out
 
+    def mark_all_seen(self) -> None:
+        db = self._find_db()
+        if db and db.is_file():
+            try:
+                con = _ro(db)
+                try:
+                    cur = con.cursor()
+                    cur.execute("SELECT max(id) FROM messages")
+                    row = cur.fetchone()
+                    if row and row[0]:
+                        self.state["last_id"] = int(row[0])
+                finally:
+                    con.close()
+            except Exception:
+                pass
+        self.state["init"] = True
+
     def fetch_recent(self, limit: int = 5) -> list:
         db = self._find_db()
         if not db:
@@ -930,10 +984,8 @@ class DeepSeekWatcher:
         if not s_dir.is_dir():
             return []
         # Основные интерактивные сессии пользователя в DSH всегда находятся в папках с префиксом 'session-'
-        # Внутренние технические субагенты создаются сотнями в папках с голыми UUID
+        # Строго по правилу: никогда не использовать маску '*/*/session.v4.jsonl.zstd' во избежание захвата сотен под-агентов.
         files = list(s_dir.glob("*/session-*/session.v4.jsonl.zstd"))
-        if not files:
-            files = list(s_dir.glob("*/*/session.v4.jsonl.zstd"))
         files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
         return files[:limit]
 
@@ -1408,19 +1460,13 @@ class KimiWatcher:
     def mark_all_seen(self) -> None:
         if not self.available():
             return
-        seen = set(self.state.get("seen", []))
-        seen_texts = self.state.setdefault("seen_texts", {})
-        zstds = self._get_zstd_files(limit=16)
-        for zpath in zstds:
-            sess_id = zpath.parent.name.replace("session-", "")
-            turns, title = self._parse_zstd_session(zpath)
-            for tnum, t in turns.items():
-                key = f"dsh:{sess_id}:{tnum}"
-                seen.add(key)
-                parts = t.get("text_parts", [])
-                if parts:
-                    seen_texts[key] = parts[-1].strip()
-        self.state["seen"] = list(seen)[-2000:]
+        files_state = self.state.setdefault("files", {})
+        for wpath in self._get_wire_files():
+            try:
+                files_state[str(wpath)] = wpath.stat().st_size
+            except OSError:
+                pass
+        self.state["streaming"] = {}
         self.state["init"] = True
 
     def fetch_recent(self, limit: int = 5) -> list:

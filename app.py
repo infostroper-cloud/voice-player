@@ -1543,18 +1543,31 @@ def render_audio_blocking(item: Item, rate: str = TTS_RATE, voice: str = TTS_VOI
 
 # ============================ ТРАНСКРИБАЦИЯ (faster-whisper) ============================
 
-try:
-    from faster_whisper import WhisperModel as _WhisperModel
-    _WHISPER_OK = True
-except Exception as _e:
-    _WHISPER_OK = False
-    _WHISPER_IMPORT_ERR = str(_e)
+_WhisperModel = None
+_WHISPER_CHECKED = False
+_WHISPER_OK = False
+_WHISPER_IMPORT_ERR = ""
+
+def _ensure_whisper() -> bool:
+    global _WhisperModel, _WHISPER_CHECKED, _WHISPER_OK, _WHISPER_IMPORT_ERR
+    if not _WHISPER_CHECKED:
+        _WHISPER_CHECKED = True
+        try:
+            from faster_whisper import WhisperModel as _WM
+            _WhisperModel = _WM
+            _WHISPER_OK = True
+        except Exception as _e:
+            _WHISPER_OK = False
+            _WHISPER_IMPORT_ERR = str(_e)
+    return _WHISPER_OK
 
 WHISPER_MODEL_SIZE = "base"   # tiny/base/small/medium — баланс скорость/качество
 _whisper_holder = {"model": None, "size": None, "lock": threading.Lock()}
 
 
 def _get_whisper(size: str):
+    if not _ensure_whisper():
+        raise RuntimeError(f"faster-whisper не доступен: {_WHISPER_IMPORT_ERR}")
     with _whisper_holder["lock"]:
         if _whisper_holder["model"] is None or _whisper_holder["size"] != size:
             _whisper_holder["model"] = _WhisperModel(size, device="cpu", compute_type="int8")
@@ -2318,8 +2331,7 @@ class VoicePlayerApp:
                                                 # иначе Microsoft троттлит одновременные соединения → таймауты
         self._trans_queue: queue.Queue = queue.Queue()
         threading.Thread(target=self._transcribe_worker_loop, daemon=True, name="whisper").start()
-        if _WHISPER_OK:                     # предзагрузка модели в фоне — первая транскрибация без зависания
-            threading.Thread(target=self._preload_whisper, daemon=True, name="whisper-preload").start()
+        # Модель Whisper загружается лениво (по первому требованию), чтобы не утяжелять старт и не тратить 600 МБ RAM
 
         self._auto_update = bool(self.prefs.get("auto_update", True))
         self._update_ready = ""
@@ -3560,6 +3572,7 @@ class VoicePlayerApp:
         self.lbl_dur = ttk.Label(seek_row, text="0:00", style="Dim.TLabel", width=5)
         self.lbl_dur.grid(row=0, column=2, sticky="e")
         self._seek_frac = 0.0
+        self._seek_idle = False
         self._wave = None; self._wave_id = None
         self._ab = [None, None]
         self.seek_canvas.bind("<Button-1>", self._seek_canvas_click)
@@ -3739,6 +3752,8 @@ class VoicePlayerApp:
         self.btn_filt_reset = ttk.Button(filt, text=vp_i18n.t("reset"), width=8, command=self._reset_filters,
                                          style="Toggle.TButton")
         self.btn_filt_reset.pack(side="left")
+        self._last_rendered_authors = None
+        self._last_rendered_dates = None
 
         self.search_frame = ttk.Frame(sub_bars)
         self.search_entry = ttk.Entry(self.search_frame, textvariable=self.var_search)
@@ -4227,7 +4242,7 @@ class VoicePlayerApp:
                      dedup=False)
 
     def _load_audio_folder(self):
-        if not _WHISPER_OK:
+        if not _ensure_whisper():
             messagebox.showerror(APP_NAME, "Движок распознавания не установлен."); return
         d = filedialog.askdirectory(title="Папка с аудиофайлами")
         if not d:
@@ -4317,7 +4332,7 @@ class VoicePlayerApp:
 
     # ------------------ live-распознавание ------------------
     def _toggle_live(self):
-        if not (_STREAM_OK and _WHISPER_OK):
+        if not (_STREAM_OK and _ensure_whisper()):
             messagebox.showerror(APP_NAME, "Нужны аудио-движок и распознавание."); return
         if not self._live:
             try:
@@ -4604,7 +4619,7 @@ class VoicePlayerApp:
 
     # ------------------ диктовка ответа голосом ------------------
     def _toggle_dictate(self):
-        if not (_STREAM_OK and _WHISPER_OK):
+        if not (_STREAM_OK and _ensure_whisper()):
             messagebox.showerror(APP_NAME, "Нужны аудио-движок и распознавание (whisper)."); return
         if not self._recording and not self._recording_to_field:
             try:
@@ -4727,7 +4742,7 @@ class VoicePlayerApp:
             lines.append(f"Аудио: ошибка ({e})")
         lp = find_loopback_device()
         lines.append(f"Системный звук (Стерео микшер): {'есть' if lp is not None else 'нет (нужен soundcard)'}")
-        lines.append(f"Распознавание (whisper): {'OK, модель ' + self.var_model.get() if _WHISPER_OK else 'НЕТ'}")
+        lines.append(f"Распознавание (whisper): {'OK, модель ' + self.var_model.get() if _ensure_whisper() else 'НЕТ'}")
         try:
             import fastembed  # noqa
             lines.append("Семантический поиск: OK")
@@ -4740,7 +4755,7 @@ class VoicePlayerApp:
 
     # ------------------ голосовые команды (hands-free) ------------------
     def _toggle_voicecmd(self):
-        if not (_STREAM_OK and _WHISPER_OK):
+        if not (_STREAM_OK and _ensure_whisper()):
             messagebox.showerror(APP_NAME, "Нужны аудио-движок и распознавание."); return
         if not self._voicecmd:
             try:
@@ -5849,6 +5864,7 @@ class VoicePlayerApp:
             return
         try:
             if self.player.has_track():
+                self._seek_idle = False
                 dur = self.player.duration(); pos = self.player.position()
                 if dur > 0:
                     self._seek_frac = min(1.0, pos / dur)
@@ -5857,8 +5873,10 @@ class VoicePlayerApp:
                     self.lbl_dur.configure(text=self._fmt_time(dur))
                     self._highlight_speaking(pos)
             else:
-                self._seek_frac = 0.0; self._draw_seek(0.0)
-                self.lbl_pos.configure(text="0:00"); self.lbl_dur.configure(text="0:00")
+                if not getattr(self, "_seek_idle", False):
+                    self._seek_frac = 0.0; self._draw_seek(0.0)
+                    self.lbl_pos.configure(text="0:00"); self.lbl_dur.configure(text="0:00")
+                    self._seek_idle = True
         except Exception:
             pass
 
@@ -6388,14 +6406,14 @@ class VoicePlayerApp:
         while not self.stop_event.is_set():
             try:
                 disabled = set(self.prefs.get("disabled_ai_tools", []))
-                items = self.watchers.poll()
+                enabled_map = {k: (k not in disabled) for k in self.watchers.items} if hasattr(self.watchers, "items") else {}
+                items = self.watchers.poll(enabled=enabled_map)
                 if items:
-                    filtered = [it for it in items if it.get("source") not in disabled]
-                    if filtered:
-                        self._ui_after(lambda batch=filtered: self._enqueue_watched(batch))
+                    self._ui_after(lambda batch=items: self._enqueue_watched(batch))
             except Exception as e:
                 log_line(f"watcher poll error: {e}")
-            self.stop_event.wait(2.0)
+            interval = 3.5 if getattr(self, "_in_tray", False) else 2.5
+            self.stop_event.wait(interval)
 
     def _enqueue_watched(self, items: list[dict], *, autoplay_allow: bool = True) -> int:
         added = 0
@@ -7090,25 +7108,29 @@ class VoicePlayerApp:
         self._render_list()
 
     def _render_list(self):
-        # обновить списки фильтров (автор/дата) под текущую очередь
+        # обновить списки фильтров (автор/дата) под текущую очередь (с кэшированием)
         try:
             ALL_FILTER_VALUES = {"все", "all", "todos", "全部", "सभी", "すべて", "alle", "tous", ""}
             all_lbl = vp_i18n.t("filter_all")
             authors = sorted({self._disp_author(m.author) for m in self.queue_items if not m.deleted and m.author})
-            self.cmb_author.configure(values=[all_lbl] + authors)
-            cur_fa = self.var_filter_author.get().strip().lower()
-            if cur_fa in ALL_FILTER_VALUES:
-                self.var_filter_author.set(all_lbl)
-            elif cur_fa not in [a.lower() for a in ([all_lbl] + authors)]:
-                self.var_filter_author.set(all_lbl)
+            if authors != getattr(self, "_last_rendered_authors", None):
+                self._last_rendered_authors = authors
+                self.cmb_author.configure(values=[all_lbl] + authors)
+                cur_fa = self.var_filter_author.get().strip().lower()
+                if cur_fa in ALL_FILTER_VALUES:
+                    self.var_filter_author.set(all_lbl)
+                elif cur_fa not in [a.lower() for a in ([all_lbl] + authors)]:
+                    self.var_filter_author.set(all_lbl)
 
             dates = sorted({m.date_str for m in self.queue_items if not m.deleted and m.date_str})
-            self.cmb_date.configure(values=[all_lbl] + dates)
-            cur_fd = self.var_filter_date.get().strip().lower()
-            if cur_fd in ALL_FILTER_VALUES:
-                self.var_filter_date.set(all_lbl)
-            elif cur_fd not in [d.lower() for d in ([all_lbl] + dates)]:
-                self.var_filter_date.set(all_lbl)
+            if dates != getattr(self, "_last_rendered_dates", None):
+                self._last_rendered_dates = dates
+                self.cmb_date.configure(values=[all_lbl] + dates)
+                cur_fd = self.var_filter_date.get().strip().lower()
+                if cur_fd in ALL_FILTER_VALUES:
+                    self.var_filter_date.set(all_lbl)
+                elif cur_fd not in [d.lower() for d in ([all_lbl] + dates)]:
+                    self.var_filter_date.set(all_lbl)
         except Exception:
             pass
         for row in self.tree.get_children():
@@ -7120,6 +7142,7 @@ class VoicePlayerApp:
         total = len(v)
         pending_render = sum(1 for it in self.queue_items if not it.deleted and not it.audio_ready and not it.audio_error)
         cur_iid = None
+        item_to_idx = {it.id: i for i, it in enumerate(self.queue_items)}
         for v_pos, item in enumerate(v):
             tags: list[str] = []
             is_cur = item.id == cur_id
@@ -7140,7 +7163,7 @@ class VoicePlayerApp:
             marks = ("📌" if item.pinned else "") + ("⭐" if item.favorite else "") \
                     + ("🔇" if item.author in self._muted else "") \
                     + ("🔔" if item.author in self._watch else "") + tag_for(item.text)
-            real_idx = self.queue_items.index(item)
+            real_idx = item_to_idx.get(item.id, v_pos)
             iid = self.tree.insert("", "end", values=(
                 src_icon, (marks + " " if marks else "") + self._disp_author(item.author)[:24],
                 item.date_str or "",
@@ -8449,7 +8472,7 @@ class VoicePlayerApp:
             self.root.after(0, lambda: self._set_status(f"не удалось прочитать {path.name}: {e}", ok=False))
 
     def _load_audio_file(self):
-        if not _WHISPER_OK:
+        if not _ensure_whisper():
             messagebox.showerror(APP_NAME, "Движок распознавания не установлен.\n"
                                  "Запусти install-deps.cmd (faster-whisper).")
             return
