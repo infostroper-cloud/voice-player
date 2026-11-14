@@ -709,13 +709,25 @@ AUDIO_DIR   = Path(tempfile.gettempdir()) / "voice-player-audio"
 ICON_PATH   = (APP_DIR / "icon.ico") if (APP_DIR / "icon.ico").exists() else (_RES_DIR / "icon.ico")
 _PIPER_OK   = vp_piper.is_available()
 TTS_VOICE   = vp_piper.DEFAULT_VOICE if _PIPER_OK else "en-US-BrianMultilingualNeural"
-# каталог голосов для выбора в UI: подпись → id (piper:… работает на компьютере, остальные — edge-tts)
+MANUAL_AUTHORS = {
+    "Мой текст", "My Text", "Mi texto", "我的文本", "मेरा पाठ",
+    "マイテキスト", "Mein Text", "Mon texte",
+    "Выделенный текст", "Буфер обмена", "Статья", "Проба голоса", "Из архива",
+}
+# каталог голосов для выбора в UI: подпись → id (★ HD Multilingual / остальные edge-tts / piper)
 VOICES = {
-    **(vp_piper.VOICE_LABELS if _PIPER_OK else {}),
-    # Мультиязычные нейроголоса Edge TTS
-    "English — Brian (Multilingual)":    "en-US-BrianMultilingualNeural",
-    "English — Ava (Expressive)":        "en-US-AvaMultilingualNeural",
-    "English — Andrew":                  "en-US-AndrewMultilingualNeural",
+    # ★ Флагманские HD-голоса (уровень Speechify / Copilot Multilingual — чёткая дикция RU + EN)
+    "★ Brian HD — Мультиязычный (муж, чёткий)":        "en-US-BrianMultilingualNeural",
+    "★ Andrew HD — Мультиязычный (муж, выразительный)": "en-US-AndrewMultilingualNeural",
+    "★ Ava HD — Мультиязычный (жен, живой)":            "en-US-AvaMultilingualNeural",
+    "★ Emma HD — Мультиязычный (жен, мягкий)":          "en-US-EmmaMultilingualNeural",
+    "★ Remy HD — Мультиязычный (муж, бархатный)":       "fr-FR-RemyMultilingualNeural",
+    "★ Vivienne HD — Мультиязычный (жен, тёплый)":      "fr-FR-VivienneMultilingualNeural",
+    "★ William HD — Мультиязычный (муж, дикторский)":   "en-AU-WilliamMultilingualNeural",
+    "★ Giuseppe HD — Мультиязычный (муж, энергичный)":  "it-IT-GiuseppeMultilingualNeural",
+    "★ Thalita HD — Мультиязычный (жен, мелодичный)":   "pt-BR-ThalitaMultilingualNeural",
+    "★ Hyunsu HD — Мультиязычный (муж, спокойный)":     "ko-KR-HyunsuMultilingualNeural",
+    # Нативные голоса Edge TTS
     "Русский — Дмитрий":                 "ru-RU-DmitryNeural",
     "Русский — Светлана":                "ru-RU-SvetlanaNeural",
     "Español — Alvaro (España)":         "es-ES-AlvaroNeural",
@@ -730,6 +742,7 @@ VOICES = {
     "Deutsch — Katja":                   "de-DE-KatjaNeural",
     "Français — Henri":                  "fr-FR-HenriNeural",
     "Français — Denise":                 "fr-FR-DeniseNeural",
+    **(vp_piper.VOICE_LABELS if _PIPER_OK else {}),
 }
 
 # Чёткие монохромные иконки из системного шрифта Segoe Fluent Icons / MDL2 (векторные,
@@ -886,6 +899,7 @@ class Item:
     date_str:  str = ""
     rendered_rate: str = ""        # темп edge-tts, с которым реально отрендерен mp3
     rendered_voice: str = ""       # голос готовых частей: досказывать реплику им же (mp3 склеиваются)
+    custom_voice: str = ""         # голос конкретной ручной реплики (поверх голоса по умолчанию)
     shown_cache: tuple = field(default=("", ""), compare=False, repr=False)   # (исходник, текст для показа)
     audio_path: Optional[Path] = None
     audio_ready: bool = False
@@ -908,6 +922,22 @@ class Item:
     forced: bool = False            # пользователь сам нажал «Озвучить» — фильтры не прячут
     prompt: str = ""                # запрос пользователя (вопрос диалога из Antigravity/Codex)
     title: str = ""                 # заголовок диалога/треда
+
+
+def _is_manual_item(item: Item) -> bool:
+    """Вернуть True для реплик из поля ввода/буфера — они всегда берут диктора по умолчанию."""
+    return item.source == "manual" or item.author in MANUAL_AUTHORS
+
+
+def _resolve_item_voice(item: Item, author_voices: dict, default_voice: str) -> str:
+    """Выбрать диктора: явный голос реплики -> голос потока/модели (не manual) -> по умолчанию."""
+    if getattr(item, "custom_voice", ""):
+        return item.custom_voice
+    if not _is_manual_item(item):
+        v = author_voices.get(item.author)
+        if v:
+            return v
+    return default_voice or TTS_VOICE
 
 
 # ============================ TTS ============================
@@ -1530,12 +1560,14 @@ def render_audio_blocking(item: Item, rate: str = TTS_RATE, voice: str = TTS_VOI
         log_line(f"render skip [{item.id}]: empty text")
         return
 
-    # Автоопределение языка текста: если включен автодетект и выбран голос по умолчанию,
-    # подбираем нативный голос под язык текста (en, zh, es, ja, hi, de, fr, ru)
-    if (not item.parts_done) and (voice == TTS_VOICE or not voice):
+    # Автоопределение языка текста: срабатывает ТОЛЬКО если голос не задан (пустой),
+    # чтобы выбранный пользователем голос по умолчанию никогда не подменялся.
+    if (not item.parts_done) and not voice:
         detected = vp_i18n.detect_text_language(body)
         if detected in vp_i18n.DEFAULT_VOICES_BY_LANG:
             voice = vp_i18n.DEFAULT_VOICES_BY_LANG[detected]
+        else:
+            voice = TTS_VOICE
 
     spans = _split_for_tts(body)
     mp3_file = AUDIO_DIR / f"{item.id}.mp3"
@@ -2414,8 +2446,10 @@ class VoicePlayerApp:
         self._recording_to_field = False     # диктовка ответа в поле, а не в очередь
         self._sysrec = SystemRecorder()
         self._recording_sys = False
-        self._author_voices = {a: v for a, v in dict(self.prefs.get("author_voices", {})).items()
-                               if v in set(VOICES.values())}   # автор → id голоса (отсев удалённых)
+        self._author_voices = {
+            a: v for a, v in dict(self.prefs.get("author_voices", {})).items()
+            if v in set(VOICES.values()) and a not in MANUAL_AUTHORS
+        }   # поток/автор → id голоса (отсев удалённых и ручных псевдо-авторов)
         self._author_names = dict(self.prefs.get("author_names", {}))      # автор → отображаемое имя (псевдоним)
         self.var_tg_chat = tk.StringVar(value=self.prefs.get("tg_chat_id", ""))
         self._voicecmd = False               # режим голосовых команд
@@ -2578,6 +2612,7 @@ class VoicePlayerApp:
             return {"id": it.id, "source": it.source, "author": it.author,
                     "time_str": it.time_str, "date_str": it.date_str,
                     "text": it.text, "raw_text": it.raw_text, "rendered_rate": it.rendered_rate,
+                    "rendered_voice": it.rendered_voice, "custom_voice": getattr(it, "custom_voice", ""),
                     "prompt": getattr(it, "prompt", ""), "title": getattr(it, "title", ""),
                     "played": it.played, "pinned": it.pinned, "favorite": it.favorite,
                     "marks": it.marks, "word_marks": it.word_marks,
@@ -2624,6 +2659,8 @@ class VoicePlayerApp:
                           date_str=r.get("date_str") or "",
                           prompt=r.get("prompt") or "", title=r.get("title") or "")
                 it.rendered_rate = r.get("rendered_rate") or ""
+                it.rendered_voice = r.get("rendered_voice") or ""
+                it.custom_voice = r.get("custom_voice") or ""
                 it.played = bool(r.get("played")); it.pinned = bool(r.get("pinned"))
                 it.favorite = bool(r.get("favorite")); it.marks = r.get("marks") or []
                 it.word_marks = r.get("word_marks") or []
@@ -4357,13 +4394,20 @@ class VoicePlayerApp:
         self._voice = VOICES.get(self.var_voice.get(), TTS_VOICE)
         if vp_piper.is_local(self._voice):
             threading.Thread(target=self._preload_voice, args=(self._voice,), daemon=True, name="voice-preload").start()
+        for it in self.queue_items:
+            if not it.deleted and not it.is_file and not it.played and it.rendered_voice:
+                expected = _resolve_item_voice(it, self._author_voices, self._voice)
+                if it.rendered_voice != expected:
+                    self._reset_render_state(it)
+                    self._q_put(it, 50)
         self._save_prefs()
-        self._set_status(f"голос: {self.var_voice.get()}", ok=True)
+        self._set_status(f"голос по умолчанию: {self.var_voice.get()}", ok=True)
 
     def _preview_voice(self):
-        self.enqueue(source="manual", author="Проба голоса", time_str=time.strftime("%H:%M"),
-                     text="Привет! Это проба выбранного голоса. Так я буду читать ваши реплики.",
-                     dedup=False)
+        item = self.enqueue(source="manual", author="Проба голоса", time_str=time.strftime("%H:%M"),
+                            text="Привет! Это проба выбранного голоса. Так я буду читать ваши реплики и технические термины на русском и English.",
+                            dedup=False)
+        self._speak_now(item, "проба голоса")
 
     def _load_audio_folder(self):
         if not _ensure_whisper():
@@ -4658,31 +4702,57 @@ class VoicePlayerApp:
         txt.bind("<Control-KeyPress>", self._input_ctrl)
         txt.focus_set()
 
-    # ------------------ авто-голос по автору ------------------
+    # ------------------ авто-голос по потоку/реплике ------------------
     def _assign_author_voice(self):
         idx = self._selected_idx()
         if idx is None or not (0 <= idx < len(self.queue_items)):
             return
-        author = self.queue_items[idx].author
-        cur = next((k for k, v in VOICES.items() if v == self._author_voices.get(author)), "")
-        win = tk.Toplevel(self.root); win.title("Голос для автора")
+        item = self.queue_items[idx]
+        author = item.author
+        is_manual = _is_manual_item(item)
+        cur_vid = item.custom_voice if is_manual else self._author_voices.get(author, "")
+        cur = next((k for k, v in VOICES.items() if v == cur_vid), "")
+        win = tk.Toplevel(self.root)
+        win.title("Голос для реплики" if is_manual else "Голос для потока / автора")
         c = self.colors; win.transient(self.root); win.configure(bg=c["bg"]); win.grab_set()
-        self._center_over_root(win, 360, 150)
-        ttk.Label(win, text=f"Голос для «{author}»:", style="TLabel").pack(anchor="w", padx=14, pady=(14, 6))
-        var = tk.StringVar(value=cur or list(VOICES)[0])
-        cb = ttk.Combobox(win, textvariable=var, state="readonly", values=["(как у всех)"] + list(VOICES.keys()))
+        self._center_over_root(win, 420, 165)
+        lbl_txt = (
+            "Голос только для этой вставленной реплики (по умолчанию всегда используется основной диктор):"
+            if is_manual else f"Голос для потока / автора «{author}»:"
+        )
+        ttk.Label(win, text=lbl_txt, style="TLabel", wraplength=390).pack(anchor="w", padx=14, pady=(14, 6))
+        var = tk.StringVar(value=cur or "(по умолчанию)")
+        cb = ttk.Combobox(win, textvariable=var, state="readonly", values=["(по умолчанию)"] + list(VOICES.keys()))
         cb.pack(fill="x", padx=14)
         if not cur:
-            var.set("(как у всех)")
+            var.set("(по умолчанию)")
 
         def save():
             v = var.get()
-            if v == "(как у всех)":
+            chosen_vid = "" if v in ("(по умолчанию)", "(как у всех)") else VOICES.get(v, TTS_VOICE)
+            if is_manual:
+                item.custom_voice = chosen_vid
                 self._author_voices.pop(author, None)
+                self._save_prefs()
+                self._reset_render_state(item)
+                self._q_put(item, 0 if idx == self.current_idx else 20)
+                self._save_session()
+                win.destroy()
+                self._set_status(f"голос для выбранной реплики: {v}", ok=True)
             else:
-                self._author_voices[author] = VOICES.get(v, TTS_VOICE)
-            self._save_prefs(); win.destroy()
-            self._set_status(f"голос для «{author}»: {v}", ok=True)
+                if not chosen_vid:
+                    self._author_voices.pop(author, None)
+                else:
+                    self._author_voices[author] = chosen_vid
+                self._save_prefs()
+                for it in self.queue_items:
+                    if not it.deleted and not it.is_file and it.author == author and not it.played:
+                        expected = _resolve_item_voice(it, self._author_voices, getattr(self, "_voice", TTS_VOICE))
+                        if not it.rendered_voice or it.rendered_voice != expected:
+                            self._reset_render_state(it)
+                            self._q_put(it, 30)
+                win.destroy()
+                self._set_status(f"голос для потока «{author}»: {v}", ok=True)
         btns = ttk.Frame(win); btns.pack(fill="x", padx=14, pady=12)
         ttk.Button(btns, text="OK", style="Primary.TButton", command=save).pack(side="left")
         ttk.Button(btns, text="Отмена", command=win.destroy).pack(side="left", padx=(6, 0))
@@ -6869,7 +6939,7 @@ class VoicePlayerApp:
             if item.deleted or (item.audio_ready and not item.more_parts):
                 continue
             # Озвучка всегда в нейтральном темпе; скорость регулирует плеер на лету.
-            voice = self._author_voices.get(item.author) or getattr(self, "_voice", TTS_VOICE)
+            voice = _resolve_item_voice(item, self._author_voices, getattr(self, "_voice", TTS_VOICE))
             # объявление автора голосом (только доска; флаг кэшируем в обычный атрибут —
             # tk-переменные из фонового потока трогать нельзя)
             lead = ""
@@ -7010,6 +7080,7 @@ class VoicePlayerApp:
     def _reset_render_state(self, item: Item):
         item.audio_error = None; item.audio_ready = False; item.audio_path = None
         item.parts_done = []; item.parts_fed = 0; item.more_parts = False
+        item.rendered_voice = ""
         item.render_attempts = 0                      # ручной повтор → свежий бюджет авто-повторов
 
     def _maybe_auto_retry(self, item: Item) -> bool:
