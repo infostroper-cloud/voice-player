@@ -264,6 +264,26 @@ class CodexAndAntigravityWatchers(unittest.TestCase):
         self.assertIn("Часть 1: анализ.", items[0]["text"])
         self.assertIn("Часть 2: выводы.", items[0]["text"])
 
+        # 3. Ход в процессе генерации (без turn/end) не должен отдаваться преждевременно
+        events.extend([
+            {"type": "user/message", "data": {"content": [{"type": "text", "text": "Шаг 3?"}]}},
+            {"type": "assistant/message", "seq": 30, "data": {"turn": 3, "message": {"content": [{"type": "text", "text": "Начало ответа (шаг 1)..."}]}}},
+        ])
+        _write_zstd_events(events)
+        # При свежем файле poll() должен ждать окончания (turn/end) и возвращать пустой список
+        self.assertEqual(watcher.poll(now=time.time()), [])
+
+        # Финализируем ход 3 (добавляем итоговый текст и turn/end)
+        events.extend([
+            {"type": "assistant/message", "seq": 31, "data": {"turn": 3, "message": {"content": [{"type": "text", "text": "Итоговое заключение (шаг 2)."}]}}},
+            {"type": "turn/end", "seq": 32, "data": {"turn": 3}}
+        ])
+        _write_zstd_events(events)
+        items3 = watcher.poll(now=time.time())
+        self.assertEqual(len(items3), 1)
+        self.assertIn("Начало ответа (шаг 1)...", items3[0]["text"])
+        self.assertIn("Итоговое заключение (шаг 2).", items3[0]["text"])
+
     def test_kimi_watcher(self):
         wire_dir = self.home / ".kimi-desktop" / "daimon-share" / "daimon" / "runtime" / "kimi-code" / "home" / "sessions" / "s1" / "c1" / "agents" / "main"
         wire_dir.mkdir(parents=True)

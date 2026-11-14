@@ -981,18 +981,16 @@ class DeepSeekWatcher:
                 max_turn = max(turns.keys()) if turns else 0
                 for tnum in sorted(turns.keys()):
                     t = turns[tnum]
-                    # Если ход ещё не завершён и файл обновлялся в последние 3 сек — ждём финала
+                    # Если ход ещё не завершён и это последний ход сессии — ждём сигнала turn/end
+                    # В многошаговых агентах вызовы инструментов занимают 10-30 сек, поэтому не отдаём куски раньше времени
                     if not t.get("completed") and tnum == max_turn:
                         try:
-                            if (now - zpath.stat().st_mtime) < 3.0:
+                            if (now - zpath.stat().st_mtime) < 45.0:
                                 continue
                         except OSError:
                             continue
 
                     key = f"dsh:{sess_id}:{tnum}"
-                    if key in seen:
-                        continue
-
                     parts = t.get("text_parts", [])
                     resp = "\n\n".join(parts).strip()
                     if not resp:
@@ -1000,7 +998,17 @@ class DeepSeekWatcher:
                             seen.add(key)
                         continue
 
+                    seen_lens = self.state.setdefault("seen_lens", {})
+                    prev_len = seen_lens.get(key, 0)
+                    if key in seen:
+                        # Если ход уже видели, но теперь он завершился и текст вырос — разрешаем обновить
+                        if t.get("completed") and len(resp) > prev_len:
+                            pass
+                        else:
+                            continue
+
                     seen.add(key)
+                    seen_lens[key] = len(resp)
                     if first_run:
                         continue
 
@@ -1060,6 +1068,10 @@ class DeepSeekWatcher:
                     continue
 
         self.state["seen"] = list(seen)[-1000:]
+        if "seen_lens" in self.state and len(self.state["seen_lens"]) > 1000:
+            lens = self.state["seen_lens"]
+            keep_keys = set(self.state["seen"])
+            self.state["seen_lens"] = {k: v for k, v in lens.items() if k in keep_keys}
         self.state["init"] = True
         return out
 

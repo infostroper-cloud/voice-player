@@ -6282,6 +6282,25 @@ class VoicePlayerApp:
                     if title and not prev.title:
                         prev.title = title
                     return None
+                # Если реплика от того же источника с тем же запросом, но новый текст существенно полнее (финал многошагового ответа)
+                if not prev.deleted and prev.source == source and prompt and prev.prompt == prompt:
+                    prev_text = prev.raw_text.strip()
+                    if len(norm_raw) > len(prev_text) and (norm_raw.startswith(prev_text[:60]) or prev_text in norm_raw):
+                        prev.raw_text = text
+                        prev.text = clean
+                        if title and not prev.title:
+                            prev.title = title
+                        # Если реплика ещё не проиграна — сбрасываем кэш аудио для полной озвучки
+                        if not prev.played:
+                            prev.audio_path = None
+                            prev.audio_ready = False
+                            if 0 <= self.current_idx < len(self.queue_items) and self.queue_items[self.current_idx] is prev:
+                                try: self.player.stop()
+                                except Exception: pass
+                                self.root.after(50, lambda p=prev: self.play_item(p))
+                        self._save_session()
+                        self.root.after(0, self._request_render)
+                        return prev
         item = Item(id=str(uuid4()), source=source, author=author, time_str=time_str,
                     text=clean, raw_text=text, date_str=date_str or time.strftime("%d.%m.%Y"),
                     prompt=prompt, title=title)
