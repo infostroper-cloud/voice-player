@@ -961,6 +961,10 @@ class DeepSeekWatcher:
                         if turn_idx in turns:
                             turns[turn_idx]["completed"] = True
                             turns[turn_idx]["last_seq"] = seq
+                    elif t == "approval/asked":
+                        if turns:
+                            last_t = max(turns.keys())
+                            turns[last_t]["approval_asked"] = True
                 except Exception:
                     continue
         except Exception:
@@ -997,17 +1001,10 @@ class DeepSeekWatcher:
                 max_turn = max(turns.keys()) if turns else 0
                 for tnum in sorted(turns.keys()):
                     t = turns[tnum]
-                    include_reasoning = bool(self.options.get("ai_intermediate_reasoning", False))
-
-                    # Если пользователь отключил промежуточные размышления — отдаём ТОЛЬКО завершённый ответ (после turn/end)
-                    if not include_reasoning and not t.get("completed"):
-                        continue
-
-                    # Если промежуточные шаги включены, но ход ещё не завершён и это последний ход сессии — ждём сигнала turn/end
-                    # В многошаговых агентах вызовы инструментов занимают 10-30 сек, поэтому не отдаём куски раньше времени
-                    if include_reasoning and not t.get("completed") and tnum == max_turn:
+                    # Если ход ещё не завершён и файл обновлялся менее 1.5 сек назад — даём дозаписаться
+                    if not t.get("completed") and not t.get("approval_asked") and tnum == max_turn:
                         try:
-                            if (now - zpath.stat().st_mtime) < 45.0:
+                            if (now - zpath.stat().st_mtime) < 1.5:
                                 continue
                         except OSError:
                             continue
@@ -1019,6 +1016,7 @@ class DeepSeekWatcher:
                             seen.add(key)
                         continue
 
+                    include_reasoning = bool(self.options.get("ai_intermediate_reasoning", False))
                     if include_reasoning:
                         resp = "\n\n".join(parts).strip()
                     else:
@@ -1029,17 +1027,13 @@ class DeepSeekWatcher:
                             seen.add(key)
                         continue
 
-                    seen_lens = self.state.setdefault("seen_lens", {})
-                    prev_len = seen_lens.get(key, 0)
-                    if key in seen:
-                        # Если ход уже видели, но теперь он завершился и текст вырос — разрешаем обновить
-                        if t.get("completed") and len(resp) > prev_len:
-                            pass
-                        else:
-                            continue
+                    seen_texts = self.state.setdefault("seen_texts", {})
+                    prev_text = seen_texts.get(key, "")
+                    if key in seen and resp == prev_text:
+                        continue
 
                     seen.add(key)
-                    seen_lens[key] = len(resp)
+                    seen_texts[key] = resp
                     if first_run:
                         continue
 
@@ -1099,10 +1093,10 @@ class DeepSeekWatcher:
                     continue
 
         self.state["seen"] = list(seen)[-1000:]
-        if "seen_lens" in self.state and len(self.state["seen_lens"]) > 1000:
-            lens = self.state["seen_lens"]
+        if "seen_texts" in self.state and len(self.state["seen_texts"]) > 1000:
+            texts = self.state["seen_texts"]
             keep_keys = set(self.state["seen"])
-            self.state["seen_lens"] = {k: v for k, v in lens.items() if k in keep_keys}
+            self.state["seen_texts"] = {k: v for k, v in texts.items() if k in keep_keys}
         self.state["init"] = True
         return out
 
@@ -1121,8 +1115,6 @@ class DeepSeekWatcher:
                     if not parts:
                         continue
                     include_reasoning = bool(self.options.get("ai_intermediate_reasoning", False))
-                    if not include_reasoning and not t.get("completed"):
-                        continue
                     if include_reasoning:
                         resp = "\n\n".join(parts).strip()
                     else:
