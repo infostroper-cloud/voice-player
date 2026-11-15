@@ -1796,7 +1796,9 @@ def render_audio_blocking(item: Item, rate: str = TTS_RATE, voice: str = TTS_VOI
         return (lead.rstrip(". ") + ".\n" + chunk) if (lead and i == 0) else chunk
 
     cancel_evt = threading.Event()
-    with ThreadPoolExecutor(max_workers=TTS_PARALLEL_PARTS, thread_name_prefix="tts-part") as pool:
+    is_local_engine = vp_piper.is_local(voice) or vp_kokoro.is_local(voice)
+    part_workers = 1 if is_local_engine else TTS_PARALLEL_PARTS
+    with ThreadPoolExecutor(max_workers=part_workers, thread_name_prefix="tts-part") as pool:
         futures = {i: pool.submit(_synthesize_with_retries, part_text(i), rate, part_file(i), voice, item.id, cancel_evt)
                    for i in range(done, len(spans))}
         try:
@@ -4620,12 +4622,15 @@ class VoicePlayerApp:
         self._voice = VOICES.get(self.var_voice.get(), TTS_VOICE)
         if vp_piper.is_local(self._voice) or vp_kokoro.is_local(self._voice):
             threading.Thread(target=self._preload_voice, args=(self._voice,), daemon=True, name="voice-preload").start()
+        requeued = 0
         for it in self.queue_items:
             if not it.deleted and not it.is_file and not it.played and it.rendered_voice:
                 expected = _resolve_item_voice(it, self._author_voices, self._voice)
                 if it.rendered_voice != expected:
                     self._reset_render_state(it)
-                    self._q_put(it, 50)
+                    if it is self.current or requeued < 1:
+                        self._q_put(it, 50)
+                        requeued += 1
         self._save_prefs()
         self._set_status(f"голос по умолчанию: {self.var_voice.get()}", ok=True)
 

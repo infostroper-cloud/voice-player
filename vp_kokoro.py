@@ -5,6 +5,7 @@
 """
 import importlib.util
 import json
+import os
 import re
 import threading
 from pathlib import Path
@@ -60,7 +61,17 @@ def _ensure_assets(name: str) -> tuple:
     if not (espeak_dir / "ru_dict").is_file():
         snapshot_download(
             repo_id=HF_REPO,
-            allow_patterns=["espeak-data/**"],
+            allow_patterns=[
+                "espeak-data/ru_dict",
+                "espeak-data/en_dict",
+                "espeak-data/phontab",
+                "espeak-data/phonindex",
+                "espeak-data/phondata",
+                "espeak-data/intonations",
+                "espeak-data/lang/zle/ru",
+                "espeak-data/lang/gmw/en*",
+                "espeak-data/voices/*",
+            ],
             local_dir=str(KOKORO_DIR),
         )
 
@@ -144,6 +155,7 @@ def _get_engine(voice: str):
         _sessions.clear()  # держим в памяти одну ONNX-модель (~138 МБ)
         opts = ort.SessionOptions()
         opts.inter_op_num_threads = 1
+        opts.intra_op_num_threads = min(4, max(2, (os.cpu_count() or 4) // 2))
         _sessions[onnx_key] = ort.InferenceSession(
             onnx_key, sess_options=opts, providers=["CPUExecutionProvider"]
         )
