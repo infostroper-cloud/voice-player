@@ -4622,13 +4622,14 @@ class VoicePlayerApp:
         self._voice = VOICES.get(self.var_voice.get(), TTS_VOICE)
         if vp_piper.is_local(self._voice) or vp_kokoro.is_local(self._voice):
             threading.Thread(target=self._preload_voice, args=(self._voice,), daemon=True, name="voice-preload").start()
+        cur_item = self.queue_items[self.current_idx] if 0 <= self.current_idx < len(self.queue_items) else None
         requeued = 0
         for it in self.queue_items:
             if not it.deleted and not it.is_file and not it.played and it.rendered_voice:
                 expected = _resolve_item_voice(it, self._author_voices, self._voice)
                 if it.rendered_voice != expected:
                     self._reset_render_state(it)
-                    if it is self.current or requeued < 1:
+                    if it is cur_item or requeued < 1:
                         self._q_put(it, 50)
                         requeued += 1
         self._save_prefs()

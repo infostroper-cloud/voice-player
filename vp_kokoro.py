@@ -105,7 +105,7 @@ class _KokoroRuG2P:
         self._espeak_dir = str(espeak_dir)
 
         self._accent = RUAccent()
-        self._accent.load(omograph_model_size="turbo3.1", use_dictionary=True, tiny_mode=False)
+        self._accent.load(omograph_model_size="turbo3.1", use_dictionary=True, tiny_mode=True)
         mod._patch_token_type_ids(self._accent)
 
         tok_data = json.loads((base_dir / "tokenizer.json").read_text(encoding="utf-8"))
@@ -185,12 +185,11 @@ def synthesize(text: str, voice: str, mp3_path: Path) -> list:
 
     marks, pcm = [], bytearray()
     t = 0.0
-    with _lock:
-        g2p, sess, style_pack = _get_engine(voice)
-        input_names = {i.name for i in sess.get_inputs()}
-        speed_arr = np.array([1.0], dtype=np.float32)
-
-        for sentence in vp_piper.split_sentences(text):
+    for sentence in vp_piper.split_sentences(text):
+        with _lock:
+            g2p, sess, style_pack = _get_engine(voice)
+            input_names = {i.name for i in sess.get_inputs()}
+            speed_arr = np.array([1.0], dtype=np.float32)
             ids = g2p.text_to_ids(sentence)
             if not ids:
                 continue
