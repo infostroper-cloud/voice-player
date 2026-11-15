@@ -783,7 +783,7 @@ def _synthesize_inproc(text: str, rate: str, mp3_path: "Path", voice: str = TTS_
 
     async def _run():
         last_err = None
-        for branches, conn_to, recv_to in ((1, 8, 10), (3, 8, 12), (3, 10, 15)):
+        for branches, conn_to, recv_to in ((1, 8, 15), (2, 10, 20)):
             if branches == 1:
                 try:
                     data, sents, words = await _fetch_once(conn_to, recv_to)
@@ -884,7 +884,7 @@ def _synthesize(text: str, rate: str, mp3_path: "Path", voice: str = TTS_VOICE) 
                 stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=errf,
                 close_fds=True, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
             )
-            deadline = _t0 + TTS_TIMEOUT_S
+            deadline = _t0 + min(TTS_TIMEOUT_S, 30)
             while time.time() < deadline:
                 if done_path.exists():
                     break                                  # готово (звук + тайминги записаны)
@@ -1272,16 +1272,20 @@ def render_audio_blocking(item: Item, rate: str = TTS_RATE, voice: str = TTS_VOI
                 item.audio_ready = False
     else:
         with ThreadPoolExecutor(max_workers=TTS_PARALLEL_PARTS, thread_name_prefix="tts-part") as pool:
-            futures = {i: pool.submit(_synthesize_with_retries, part_text(i), rate, part_file(i), voice, item.id, cancel_evt)
-                       for i in range(done, len(spans))}
             try:
-                for i in range(done, len(spans)):
-                    sents, words = futures[i].result()
-                    _commit_part(i, sents, words)
+                for batch_start in range(done, len(spans), TTS_PARALLEL_PARTS):
+                    batch_end = min(batch_start + TTS_PARALLEL_PARTS, len(spans))
+                    futures = {
+                        i: pool.submit(_synthesize_with_retries, part_text(i), rate, part_file(i), voice, item.id, cancel_evt)
+                        for i in range(batch_start, batch_end)
+                    }
+                    for i in range(batch_start, batch_end):
+                        sents, words = futures[i].result()
+                        _commit_part(i, sents, words)
+                    if batch_end < len(spans) and should_yield is not None and should_yield(item):
+                        return               # уступаем место срочным/новым репликам; дорендерим позже
             except Exception as e:
                 cancel_evt.set()
-                for f in futures.values():
-                    f.cancel()
                 item.audio_error = str(e)[:300] or "render failed"
                 if on_part is None or not item.parts_done:
                     item.audio_ready = False
@@ -6645,6 +6649,9 @@ class VoicePlayerApp:
             def _should_yield(it):
                 if self.stop_event.is_set() or it.deleted:
                     return True
+                expected = _resolve_item_voice(it, self._author_voices, getattr(self, "_voice", TTS_VOICE))
+                if it.rendered_voice and expected and it.rendered_voice != expected:
+                    return True
                 cur_it = self.queue_items[self.current_idx] if 0 <= self.current_idx < len(self.queue_items) else None
                 if it is cur_it:
                     return False
@@ -6658,6 +6665,9 @@ class VoicePlayerApp:
                 if self._rendering_item_id == item.id:
                     self._rendering_item_id = None
             if item.more_parts and not item.audio_error and not item.deleted and not self.stop_event.is_set():
+                expected = _resolve_item_voice(item, self._author_voices, getattr(self, "_voice", TTS_VOICE))
+                if item.rendered_voice and expected and item.rendered_voice != expected:
+                    self._reset_render_state(item)
                 self._q_put(item, 140)
                 continue
             if not item.audio_error and not item.more_parts and len(item.parts_done) > 1 and item.audio_path:
