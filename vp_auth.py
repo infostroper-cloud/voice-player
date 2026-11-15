@@ -12,6 +12,7 @@ import platform
 import secrets
 import threading
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 import webbrowser
@@ -128,6 +129,9 @@ def sync_lead_to_server(profile: dict, app_version: str = "") -> bool:
     """Отправить профиль пользователя на маркетинговый webhook / Supabase (если настроен)."""
     if not LEAD_WEBHOOK_URL or not profile.get("email"):
         return False
+    target_url = LEAD_WEBHOOK_URL.strip()
+    if target_url.rstrip("/").endswith("/rest/v1"):
+        target_url = target_url.rstrip("/") + "/users"
     payload = {
         "email": profile.get("email", ""),
         "name": profile.get("name", ""),
@@ -141,17 +145,23 @@ def sync_lead_to_server(profile: dict, app_version: str = "") -> bool:
     headers = {"Content-Type": "application/json", "User-Agent": "VoicePlayer/1.2"}
     if LEAD_WEBHOOK_KEY:
         headers["apikey"] = LEAD_WEBHOOK_KEY
-        headers["Authorization"] = f"Bearer {LEAD_WEBHOOK_KEY}"
-        headers["Prefer"] = "resolution=ignore-duplicates"
+        if not LEAD_WEBHOOK_KEY.startswith("sb_publishable_"):
+            headers["Authorization"] = f"Bearer {LEAD_WEBHOOK_KEY}"
+        headers["Prefer"] = "return=minimal"
     try:
         req = urllib.request.Request(
-            LEAD_WEBHOOK_URL,
+            target_url,
             data=json.dumps(payload).encode("utf-8"),
             headers=headers,
             method="POST",
         )
         with urllib.request.urlopen(req, timeout=10):
             return True
+    except urllib.error.HTTPError as e:
+        if e.code == 409:  # email уже есть в базе — повторный вход без SELECT-прав
+            return True
+        log_line(f"vp_auth lead sync error: {e}")
+        return False
     except Exception as e:
         log_line(f"vp_auth lead sync error: {e}")
         return False
