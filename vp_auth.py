@@ -23,12 +23,31 @@ _log = lambda msg: None
 
 ACCOUNT_FILE: Path = Path.home() / ".voice-player" / "account.json"
 
+def _read_secrets_env() -> dict[str, str]:
+    out: dict[str, str] = {}
+    p = Path.home() / ".voice-player-secrets.env"
+    if not p.is_file():
+        return out
+    try:
+        for line in p.read_text(encoding="utf-8", errors="ignore").splitlines():
+            s = line.strip()
+            if not s or s.startswith("#") or "=" not in s:
+                continue
+            k, v = s.split("=", 1)
+            out[k.strip()] = v.strip().strip('"').strip("'")
+    except Exception:
+        pass
+    return out
+
+
+_SECRETS = _read_secrets_env()
+
 # Заполняется своими значениями из Google Cloud Console (Desktop App OAuth Client)
 # и Supabase / Cloudflare Worker для сохранения базы email-адресов:
-GOOGLE_CLIENT_ID: str = os.environ.get("VP_GOOGLE_CLIENT_ID", "")
-GOOGLE_CLIENT_SECRET: str = os.environ.get("VP_GOOGLE_CLIENT_SECRET", "")
-LEAD_WEBHOOK_URL: str = os.environ.get("VP_LEAD_WEBHOOK_URL", "")
-LEAD_WEBHOOK_KEY: str = os.environ.get("VP_LEAD_WEBHOOK_KEY", "")
+GOOGLE_CLIENT_ID: str = os.environ.get("VP_GOOGLE_CLIENT_ID") or _SECRETS.get("VP_GOOGLE_CLIENT_ID", "")
+GOOGLE_CLIENT_SECRET: str = os.environ.get("VP_GOOGLE_CLIENT_SECRET") or _SECRETS.get("VP_GOOGLE_CLIENT_SECRET", "")
+LEAD_WEBHOOK_URL: str = os.environ.get("VP_LEAD_WEBHOOK_URL") or _SECRETS.get("VP_LEAD_WEBHOOK_URL", "")
+LEAD_WEBHOOK_KEY: str = os.environ.get("VP_LEAD_WEBHOOK_KEY") or _SECRETS.get("VP_LEAD_WEBHOOK_KEY", "")
 
 
 def set_logger(fn) -> None:
