@@ -1193,7 +1193,7 @@ def _cleanup_rendered_parts(item: "Item", keep_path: Path):
 
 
 def render_audio_blocking(item: Item, rate: str = TTS_RATE, voice: str = TTS_VOICE,
-                          lead: str = "", on_part=None) -> None:
+                          lead: str = "", on_part=None, should_yield=None) -> None:
     """Озвучить реплику. Длинную — частями: каждая часть короткая и не упирается в таймаут,
     on_part вызывается по порядку, как только готова очередная часть (можно играть, не дожидаясь
     всего). Упала часть — готовые остаются, повтор продолжит с места сбоя."""
@@ -1237,38 +1237,54 @@ def render_audio_blocking(item: Item, rate: str = TTS_RATE, voice: str = TTS_VOI
         # lead (имя автора голосом) звучит перед телом; тайминги маппим по телу, лид в них не попадёт
         return (lead.rstrip(". ") + ".\n" + chunk) if (lead and i == 0) else chunk
 
+    def _commit_part(i: int, sents, words) -> None:
+        nonlocal t_offset
+        a, b = spans[i]
+        shift = lambda marks: [(s + t_offset, e + t_offset, ca + a, cb + a) for s, e, ca, cb in marks]
+        chunk = body[a:b]
+        item.marks = item.marks + shift(_map_marks_to_chars(chunk, sents))
+        new_words = (_map_marks_to_chars(chunk, words) if words
+                     else _derive_word_marks(chunk, _map_marks_to_chars(chunk, sents)))
+        item.word_marks = item.word_marks + shift(new_words)
+        t_offset += _audio_duration(part_file(i), sents[-1][1] if sents else 0.0)
+        item.parts_done = item.parts_done + [part_file(i)]
+        item.audio_error = None
+        item.rendered_rate = rate
+        if i == 0:
+            item.audio_path = part_file(0)
+        if on_part is not None:
+            item.audio_ready = True          # уже можно играть — остальное догрузится
+            on_part(item)
+
     cancel_evt = threading.Event()
     is_local_engine = vp_piper.is_local(voice) or vp_kokoro.is_local(voice)
-    part_workers = 1 if is_local_engine else TTS_PARALLEL_PARTS
-    with ThreadPoolExecutor(max_workers=part_workers, thread_name_prefix="tts-part") as pool:
-        futures = {i: pool.submit(_synthesize_with_retries, part_text(i), rate, part_file(i), voice, item.id, cancel_evt)
-                   for i in range(done, len(spans))}
+    if is_local_engine:
         try:
             for i in range(done, len(spans)):
-                sents, words = futures[i].result()
-                a, b = spans[i]
-                shift = lambda marks: [(s + t_offset, e + t_offset, ca + a, cb + a) for s, e, ca, cb in marks]
-                chunk = body[a:b]
-                item.marks = item.marks + shift(_map_marks_to_chars(chunk, sents))
-                new_words = (_map_marks_to_chars(chunk, words) if words
-                             else _derive_word_marks(chunk, _map_marks_to_chars(chunk, sents)))
-                item.word_marks = item.word_marks + shift(new_words)
-                t_offset += _audio_duration(part_file(i), sents[-1][1] if sents else 0.0)
-                item.parts_done = item.parts_done + [part_file(i)]
-                item.audio_error = None
-                item.rendered_rate = rate
-                if i == 0:
-                    item.audio_path = part_file(0)
-                if on_part is not None:
-                    item.audio_ready = True          # уже можно играть — остальное догрузится
-                    on_part(item)
+                sents, words = _synthesize_with_retries(part_text(i), rate, part_file(i), voice, item.id, cancel_evt)
+                _commit_part(i, sents, words)
+                if i + 1 < len(spans) and should_yield is not None and should_yield(item):
+                    return                   # уступаем место срочным/новым репликам; дорендерим позже
         except Exception as e:
             cancel_evt.set()
-            for f in futures.values():
-                f.cancel()
             item.audio_error = str(e)[:300] or "render failed"
             if on_part is None or not item.parts_done:
                 item.audio_ready = False
+    else:
+        with ThreadPoolExecutor(max_workers=TTS_PARALLEL_PARTS, thread_name_prefix="tts-part") as pool:
+            futures = {i: pool.submit(_synthesize_with_retries, part_text(i), rate, part_file(i), voice, item.id, cancel_evt)
+                       for i in range(done, len(spans))}
+            try:
+                for i in range(done, len(spans)):
+                    sents, words = futures[i].result()
+                    _commit_part(i, sents, words)
+            except Exception as e:
+                cancel_evt.set()
+                for f in futures.values():
+                    f.cancel()
+                item.audio_error = str(e)[:300] or "render failed"
+                if on_part is None or not item.parts_done:
+                    item.audio_ready = False
     if item.audio_error:
         return
     if len(spans) > 1:                               # склеить в один файл: перемотка, сохранение, запуск заново
@@ -6626,12 +6642,24 @@ class VoicePlayerApp:
             streaming = hasattr(self.player, "append_file")  # старый MCI-плеер ждёт весь файл
             self._rendering_item_id = item.id
             self._ui_after(self._schedule_wave_anim)
+            def _should_yield(it):
+                if self.stop_event.is_set() or it.deleted:
+                    return True
+                cur_it = self.queue_items[self.current_idx] if 0 <= self.current_idx < len(self.queue_items) else None
+                if it is cur_it:
+                    return False
+                return not self.render_queue.empty()
+
             try:
                 render_audio_blocking(item, voice=voice, lead=lead,
-                                      on_part=self._on_part_ready if streaming else None)
+                                      on_part=self._on_part_ready if streaming else None,
+                                      should_yield=_should_yield)
             finally:
                 if self._rendering_item_id == item.id:
                     self._rendering_item_id = None
+            if item.more_parts and not item.audio_error and not item.deleted and not self.stop_event.is_set():
+                self._q_put(item, 140)
+                continue
             if not item.audio_error and not item.more_parts and len(item.parts_done) > 1 and item.audio_path:
                 self._sync_parts(item)
                 cur_it = self.queue_items[self.current_idx] if 0 <= self.current_idx < len(self.queue_items) else None
