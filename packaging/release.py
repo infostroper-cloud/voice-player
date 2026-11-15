@@ -1,7 +1,7 @@
 """Собрать архив обновления из зафиксированного в git состояния и выпустить его.
 
 Сборка:   python packaging/release.py build [--out папка]
-Выпуск:   python packaging/release.py publish   (архив уходит в GitHub Releases, плееры подхватят сами)
+Выпуск:   python packaging/release.py publish [--tg]   (архив уходит в GitHub Releases, --tg ещё и в @voiceplayer_ai)
 
 В архив попадают только файлы из белого списка и только из коммита HEAD: незафиксированные
 правки, секреты и данные в выпуск попасть не могут.
@@ -50,7 +50,7 @@ def build(out_dir: Path) -> tuple:
     return version, zip_path, sha_path
 
 
-def publish() -> None:
+def publish(notify_tg: bool = False) -> None:
     with tempfile.TemporaryDirectory() as td:
         version, zip_path, sha_path = build(Path(td))
         commit = _git("rev-parse", "HEAD").decode().strip()
@@ -64,11 +64,15 @@ def publish() -> None:
                         "--repo", PUBLIC_REPO, "--title", f"VoicePlayer {version}",
                         "--notes", f"Автообновление и установщик VoicePlayer {version}", "--latest"], check=False)
     print(f"Выпущена версия {version}")
+    if notify_tg:
+        import tg_publish
+        res = tg_publish.send_post(tg_publish.default_release_text(version))
+        print(f"Опубликовано в Telegram: message_id={res.get('result', {}).get('message_id')}")
 
 
 if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1] == "publish":
-        publish()
+        publish(notify_tg="--tg" in sys.argv[2:])
     elif len(sys.argv) > 1 and sys.argv[1] == "build":
         build(Path(sys.argv[3]) if len(sys.argv) > 3 else ROOT / "packaging" / "Output")
     else:
