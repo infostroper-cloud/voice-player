@@ -421,18 +421,25 @@ class AfPlayer:
 
 class StreamPlayer:
     """Плеер с time-stretch: скорость 0.5–2.0× меняется на лету без пересоздания файла
-    и без изменения высоты голоса. Тяжёлый стретч идёт в фоновом воркере, поэтому ни
-    UI-поток, ни аудио-колбэк не блокируются."""
+    и без изменения высоты голоса. Тяжёлый стретч идёт инкрементально (сначала 6 с,
+    далее чанками по 15 с в фоновом воркере), поэтому ни UI, ни старт не тормозят."""
+
+    _PLAY_SR = 24000
+    _PLAY_CH = 1
+    _HEAD_STRETCH_S = 6
+    _CHUNK_STRETCH_S = 15
 
     def __init__(self):
         self._lock = threading.RLock()
         self._stream = None
         self._src = None          # исходный PCM (N, ch) float32
-        self._sr = 44100
-        self._ch = 2
+        self._sr = self._PLAY_SR
+        self._ch = self._PLAY_CH
         self._out = None          # обработанный сегмент (M, ch) для текущей скорости
         self._out_pos = 0
         self._seg_src_start = 0   # позиция в исходнике, с которой начат текущий сегмент
+        self._stretched_up_to = 0 # конец обработанного префикса в кадрах исходника
+        self._tsm = None          # потоковый экземпляр WSOLA для бесшовной склейки чанков
         self._speed = 1.0
         self._target_speed = 1.0
         self._volume = 1.0
@@ -441,23 +448,32 @@ class StreamPlayer:
         self._finished = False
         self._seek_req = None      # запрос перемотки (кадр исходника) для воркера
         self._gen = 0              # номер загруженного трека: дозагрузка не попадёт в чужой
-        # воркер перестройки сегмента (скорость + перемотка)
+        # воркер перестройки сегмента (скорость + перемотка + фоновый хвост)
         self._speed_evt = threading.Event()
         self._shutdown = False
         threading.Thread(target=self._speed_worker, daemon=True, name="stream-speed").start()
 
     # ---------- DSP ----------
     @staticmethod
-    def _stretch(frames, speed):
-        if frames is None or frames.shape[0] == 0:
-            return frames
+    def _stretch(frames, speed, tsm=None, flush: bool = True):
         if abs(speed - 1.0) < 1e-3:
+            if frames is None or frames.shape[0] == 0:
+                return frames
             return frames.copy()
-        data = frames.T.copy()                       # (ch, N)
-        reader = _ArrayReader(data)
-        writer = _ArrayWriter(channels=data.shape[0])
-        tsm = _wsola(channels=data.shape[0], speed=speed)
-        tsm.run(reader, writer)
+        ch = int(frames.shape[1]) if (frames is not None and frames.ndim == 2) else 1
+        if tsm is None:
+            if frames is None or frames.shape[0] == 0:
+                return frames
+            tsm = _wsola(channels=ch, speed=speed)
+        writer = _ArrayWriter(channels=ch)
+        if frames is not None and frames.shape[0] > 0:
+            reader = _ArrayReader(frames.T.copy())     # (ch, N)
+            tsm.run(reader, writer, flush=flush)
+        elif flush:
+            finished = False
+            while not finished:
+                _, finished = tsm.flush_to(writer)
+            tsm.clear()
         return writer.data.T.copy()                  # (M, ch)
 
     def _src_pos_now(self) -> int:
@@ -473,32 +489,75 @@ class StreamPlayer:
             with self._lock:
                 if self._src is None:
                     continue
+                total = self._src.shape[0]
                 target = self._target_speed
                 seek = self._seek_req
                 self._seek_req = None
-                if seek is not None:
-                    src_start = max(0, min(int(seek), self._src.shape[0]))
-                elif abs(target - self._speed) < 1e-3:
-                    continue                          # нет изменений — нечего перестраивать
-                else:
-                    src_start = self._src_pos_now()
+                sr = self._sr
                 src = self._src
                 gen = self._gen
+                if seek is not None:
+                    is_reanchor = True
+                    src_start = max(0, min(int(seek), total))
+                    chunk_end = (total if abs(target - 1.0) < 1e-3
+                                 else min(total, src_start + sr * self._HEAD_STRETCH_S))
+                    seg_start = src_start
+                    tsm = _wsola(channels=src.shape[1], speed=target) if abs(target - 1.0) >= 1e-3 else None
+                elif abs(target - self._speed) >= 1e-3:
+                    is_reanchor = True
+                    src_start = max(0, min(self._src_pos_now(), total))
+                    chunk_end = (total if abs(target - 1.0) < 1e-3
+                                 else min(total, src_start + sr * self._HEAD_STRETCH_S))
+                    seg_start = src_start
+                    tsm = _wsola(channels=src.shape[1], speed=target) if abs(target - 1.0) >= 1e-3 else None
+                elif self._stretched_up_to < total:
+                    is_reanchor = False
+                    src_start = self._stretched_up_to
+                    chunk_end = (total if abs(target - 1.0) < 1e-3
+                                 else min(total, src_start + sr * self._CHUNK_STRETCH_S))
+                    seg_start = self._seg_src_start
+                    tsm = self._tsm
+                    self._tsm = None
+                    if tsm is None and abs(target - 1.0) >= 1e-3:
+                        tsm = _wsola(channels=src.shape[1], speed=target)
+                else:
+                    continue
+            flushed = (chunk_end >= total)
             try:
-                new_out = self._stretch(src[src_start:], target)   # тяжёлое — вне лока
+                chunk_out = self._stretch(src[src_start:chunk_end], target, tsm=tsm, flush=flushed)
             except Exception:
                 continue
             with self._lock:
-                if self._src is src:                  # трек ещё тот же
-                    self._out = new_out
+                if self._gen != gen or self._src is None:
+                    continue
+                if self._seek_req is not None or abs(self._target_speed - target) >= 1e-3:
+                    self._speed_evt.set()
+                    continue
+                if is_reanchor:
+                    self._out = chunk_out
                     self._out_pos = 0
                     self._seg_src_start = src_start
+                    self._stretched_up_to = chunk_end
+                    self._tsm = (None if flushed else tsm)
                     self._speed = target
                     self._finished = False
-                elif self._gen == gen and self._seek_req is None:
-                    # пока считали, в трек дозагрузилась часть — пересчитать с той же точки
-                    self._seek_req = src_start
-                    self._speed_evt.set()
+                    if self._stretched_up_to < self._src.shape[0]:
+                        self._speed_evt.set()
+                else:
+                    if (abs(self._speed - target) < 1e-3
+                            and self._seg_src_start == seg_start
+                            and self._stretched_up_to == src_start):
+                        if self._out is None or self._out.shape[0] == 0:
+                            self._out = chunk_out
+                        elif chunk_out is not None and chunk_out.shape[0] > 0:
+                            self._out = _np.concatenate((self._out, chunk_out))
+                        self._stretched_up_to = chunk_end
+                        self._tsm = (None if flushed else tsm)
+                        self._finished = False
+                        if self._stretched_up_to < self._src.shape[0]:
+                            self._speed_evt.set()
+                    else:
+                        self._speed_evt.set()
 
     # ---------- аудио-колбэк (поток PortAudio) ----------
     def _callback(self, outdata, frames, time_info, status):
@@ -513,7 +572,8 @@ class StreamPlayer:
                     outdata[:n] = chunk * self._volume
                 if n < frames:
                     outdata[n:] = 0
-                    self._finished = True
+                    if self._src is None or self._stretched_up_to >= self._src.shape[0]:
+                        self._finished = True
                 self._out_pos += n
         except Exception:
             try: outdata.fill(0)
@@ -570,21 +630,39 @@ class StreamPlayer:
             return None
 
     def load_and_play(self, path, speed: float = 1.0):
-        dec = _miniaudio.decode_file(str(path), output_format=_miniaudio.SampleFormat.FLOAT32)
+        dec = _miniaudio.decode_file(
+            str(path),
+            output_format=_miniaudio.SampleFormat.FLOAT32,
+            nchannels=self._PLAY_CH,
+            sample_rate=self._PLAY_SR,
+        )
         pcm = _np.array(dec.samples, dtype=_np.float32).reshape(-1, dec.nchannels)
         speed = max(0.5, min(2.0, float(speed)))
-        out0 = self._stretch(pcm, speed)             # стартовый сегмент готовим вне лока
+        total = pcm.shape[0]
+        if abs(speed - 1.0) < 1e-3:
+            head_end = total
+            tsm = None
+            out0 = pcm.copy()
+        else:
+            head_end = min(total, dec.sample_rate * self._HEAD_STRETCH_S)
+            tsm = _wsola(channels=dec.nchannels, speed=speed)
+            out0 = self._stretch(pcm[:head_end], speed, tsm=tsm, flush=(head_end >= total))
         with self._lock:
-            # Переиспользуем ОДИН поток на всю сессию (параметры edge-tts постоянны):
+            # Переиспользуем ОДИН поток на всю сессию (формат унифицирован до 24 kHz mono):
             # пересоздаём только если формат изменился — иначе просто подменяем буфер.
             need_new = (self._stream is None or self._sr != dec.sample_rate or self._ch != dec.nchannels)
             self._src = pcm; self._sr = dec.sample_rate; self._ch = dec.nchannels
             self._speed = speed; self._target_speed = speed
             self._out = out0; self._out_pos = 0; self._seg_src_start = 0
+            self._stretched_up_to = head_end
+            self._tsm = (None if head_end >= total else tsm)
+            self._seek_req = None
             self._finished = False; self._paused = False; self._has = True
             self._gen += 1
             if need_new:
                 self._open_stream()
+        if head_end < total:
+            self._speed_evt.set()
 
     def generation(self) -> int:
         with self._lock:
@@ -592,21 +670,34 @@ class StreamPlayer:
 
     def append_file(self, path, gen: int) -> bool:
         """Дописать продолжение в конец играющего трека (длинная реплика озвучивается частями)."""
-        dec = _miniaudio.decode_file(str(path), output_format=_miniaudio.SampleFormat.FLOAT32)
+        dec = _miniaudio.decode_file(
+            str(path),
+            output_format=_miniaudio.SampleFormat.FLOAT32,
+            nchannels=self._PLAY_CH,
+            sample_rate=self._PLAY_SR,
+        )
         pcm = _np.array(dec.samples, dtype=_np.float32).reshape(-1, dec.nchannels)
         with self._lock:
             if self._src is None or gen != self._gen or dec.sample_rate != self._sr or dec.nchannels != self._ch:
                 return False
             speed = self._speed
-        extra = self._stretch(pcm, speed)
+            can_stretch_eagerly = (abs(speed - 1.0) >= 1e-3 and self._stretched_up_to == self._src.shape[0])
+        extra = self._stretch(pcm, speed) if can_stretch_eagerly else None
         with self._lock:
             if self._src is None or gen != self._gen:
                 return False
+            old_len = self._src.shape[0]
             self._src = _np.concatenate((self._src, pcm))
-            if abs(speed - self._speed) < 1e-3 and self._seek_req is None:
+            self._finished = False
+            if (abs(self._speed - 1.0) < 1e-3 and abs(self._target_speed - self._speed) < 1e-3
+                    and self._seek_req is None and self._stretched_up_to == old_len):
+                self._out = _np.concatenate((self._out, pcm))
+                self._stretched_up_to = self._src.shape[0]
+            elif (extra is not None and abs(speed - self._speed) < 1e-3
+                  and self._seek_req is None and self._stretched_up_to == old_len):
                 self._out = _np.concatenate((self._out, extra))
-                self._finished = False
-            else:                                  # скорость или позиция меняются — воркер пересоберёт
+                self._stretched_up_to = self._src.shape[0]
+            else:                                  # хвост ещё дотягивается или скорость/позиция меняются
                 self._speed_evt.set()
             return True
 
@@ -645,7 +736,8 @@ class StreamPlayer:
         # Останавливаем воспроизведение, но поток НЕ закрываем (переиспользуем) —
         # колбэк просто выдаёт тишину. Закрываем поток только в shutdown().
         with self._lock:
-            self._src = None; self._out = None
+            self._src = None; self._out = None; self._tsm = None
+            self._stretched_up_to = 0; self._seek_req = None
             self._has = False; self._paused = False
             self._finished = False; self._out_pos = 0
 
@@ -2606,7 +2698,7 @@ class VoicePlayerApp:
         self._ensure_ai_hooks_connected()
         self._poll_codex_inbox()
         threading.Thread(target=self._watcher_poll_loop, daemon=True, name="ai-watchers").start()
-        self._tick()
+        self.root.after(200, self._tick)
         self.root.after(300, self._restore_sashes)   # вернуть размеры секций
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
 
@@ -2728,10 +2820,14 @@ class VoicePlayerApp:
                 self.queue_items.append(it)
             except Exception:
                 continue
+        restored_cur = None
         if cur_id:
             for i, it in enumerate(self.queue_items):
                 if it.id == cur_id:
-                    self.current_idx = i; break
+                    restored_cur = it
+                    if not it.played:
+                        self.current_idx = i
+                    break
         if self._dnd_active():           # тишина на старте — не начинать озвучку сами
             self.user_paused = True
         for it in to_render:
@@ -2739,6 +2835,9 @@ class VoicePlayerApp:
         if to_render:
             self.root.after(0, self._request_render)
         self._render_list()
+        if restored_cur is not None:
+            self._panel_item = restored_cur
+            self._update_text_panel(force_item=restored_cur)
         log_line(f"session restored: {len(self.queue_items)} items, {len(to_render)} to render")
 
     def _autosave_session(self):
@@ -2842,7 +2941,7 @@ class VoicePlayerApp:
                     return {"text": self.queue_items[self.current_idx].raw_text, "pos": pos}
         except Exception:
             pass
-        return self.prefs.get("resume")
+        return getattr(self, "_resume", None)
 
     def _restore_sashes(self):
         saved = self.prefs.get("sashes") or []
@@ -9694,7 +9793,7 @@ class VoicePlayerApp:
                         self._play_index(nxt)
                     elif nxt < 0:
                         self.current_idx = -1   # дать новым репликам автоиграть
-                elif cur.audio_ready and not self.player.has_track() and not self.user_paused:
+                elif cur.audio_ready and not self.player.has_track() and not cur.played and not self.user_paused:
                     # реплика готова, но ничего не загружено — играем её
                     self._play_index(self.current_idx)
                 elif (self.player.has_track() and self.player.is_finished() and cur.more_parts

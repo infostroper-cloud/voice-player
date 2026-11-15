@@ -1133,21 +1133,35 @@ class DeepSeekWatcher:
         first_run = not self.state.get("init")
         out = []
 
+        inc_r = bool(self.options.get("ai_intermediate_reasoning", False))
+        zstd_meta = self.state.setdefault("zstd_meta", {})
+        if not isinstance(zstd_meta, dict):
+            zstd_meta = {}
+            self.state["zstd_meta"] = zstd_meta
+
         # 1. Основной путь: чтение потоковых .zstd логов
         zstds = self._get_zstd_files(limit=8)
         if zstds:
             for zpath in zstds:
+                try:
+                    st = zpath.stat()
+                    sig = [st.st_mtime_ns, st.st_size, inc_r]
+                except OSError:
+                    continue
+                meta_key = str(zpath)
+                if zstd_meta.get(meta_key) == sig:
+                    continue
+
                 sess_id = zpath.parent.name.replace("session-", "")
                 turns, title = self._parse_zstd_session(zpath)
                 max_turn = max(turns.keys()) if turns else 0
+                deferred = False
                 for tnum in sorted(turns.keys()):
                     t = turns[tnum]
                     # Если ход ещё не завершён и файл обновлялся менее 1.5 сек назад — даём дозаписаться
                     if not t.get("completed") and not t.get("approval_asked") and tnum == max_turn:
-                        try:
-                            if (now - zpath.stat().st_mtime) < 1.5:
-                                continue
-                        except OSError:
+                        if (now - st.st_mtime) < 1.5:
+                            deferred = True
                             continue
 
                     key = f"dsh:{sess_id}:{tnum}"
@@ -1157,8 +1171,7 @@ class DeepSeekWatcher:
                             seen.add(key)
                         continue
 
-                    include_reasoning = bool(self.options.get("ai_intermediate_reasoning", False))
-                    if include_reasoning:
+                    if inc_r:
                         resp = "\n\n".join(parts).strip()
                     else:
                         resp = parts[-1].strip()
@@ -1179,7 +1192,7 @@ class DeepSeekWatcher:
                         continue
 
                     prompt = (t.get("prompt") or "").strip()
-                    when = (t["time"] / 1000.0) if t.get("time") else zpath.stat().st_mtime
+                    when = (t["time"] / 1000.0) if t.get("time") else st.st_mtime
                     out.append({
                         "source": "deepseek",
                         "author": "DeepSeek Harness",
@@ -1191,6 +1204,11 @@ class DeepSeekWatcher:
                         "text": resp,
                         "key": key,
                     })
+
+                if not deferred and (first_run or (now - st.st_mtime) >= 2.0
+                                     or all(t.get("completed") for t in turns.values())):
+                    zstd_meta.pop(meta_key, None)
+                    zstd_meta[meta_key] = sig
 
         # 2. Резервный путь (если нет zstd или zstandard не установлен): чтение JSON-кэша
         else:
@@ -1238,6 +1256,8 @@ class DeepSeekWatcher:
             texts = self.state["seen_texts"]
             keep_keys = set(self.state["seen"])
             self.state["seen_texts"] = {k: v for k, v in texts.items() if k in keep_keys}
+        if len(zstd_meta) > 64:
+            self.state["zstd_meta"] = dict(list(zstd_meta.items())[-64:])
         self.state["init"] = True
         return out
 
@@ -1246,8 +1266,18 @@ class DeepSeekWatcher:
             return
         seen = set(self.state.get("seen", []))
         seen_texts = self.state.setdefault("seen_texts", {})
+        zstd_meta = self.state.setdefault("zstd_meta", {})
+        if not isinstance(zstd_meta, dict):
+            zstd_meta = {}
+            self.state["zstd_meta"] = zstd_meta
+        inc_r = bool(self.options.get("ai_intermediate_reasoning", False))
+        now = time.time()
         zstds = self._get_zstd_files(limit=16)
         for zpath in zstds:
+            try:
+                st = zpath.stat()
+            except OSError:
+                continue
             sess_id = zpath.parent.name.replace("session-", "")
             turns, title = self._parse_zstd_session(zpath)
             for tnum, t in turns.items():
@@ -1255,8 +1285,13 @@ class DeepSeekWatcher:
                 seen.add(key)
                 parts = t.get("text_parts", [])
                 if parts:
-                    seen_texts[key] = parts[-1].strip()
+                    seen_texts[key] = ("\n\n".join(parts) if inc_r else parts[-1]).strip()
+            if (now - st.st_mtime) >= 2.0 or all(t.get("completed") for t in turns.values()):
+                zstd_meta.pop(str(zpath), None)
+                zstd_meta[str(zpath)] = [st.st_mtime_ns, st.st_size, inc_r]
         self.state["seen"] = list(seen)[-2000:]
+        if len(zstd_meta) > 64:
+            self.state["zstd_meta"] = dict(list(zstd_meta.items())[-64:])
         self.state["init"] = True
 
     def fetch_recent(self, limit: int = 5) -> list:
