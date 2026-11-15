@@ -180,9 +180,16 @@ def _ensure_model(voice: str) -> Path:
 
 _lock = threading.Lock()      # модель общая: части одной реплики озвучиваются по очереди
 _loaded = {}
+_espeak_dirty = False
 
 
 def _voice_obj(voice: str):
+    global _espeak_dirty
+    if _espeak_dirty:
+        from piper import espeakbridge
+        from piper.phonemize_espeak import ESPEAK_DATA_DIR
+        espeakbridge.initialize(str(ESPEAK_DATA_DIR))
+        _espeak_dirty = False
     if voice not in _loaded:
         from piper import PiperVoice
         _loaded.clear()       # держим в памяти один голос

@@ -38,6 +38,7 @@ if __name__ == "__main__":
     vp_updater.bootstrap(Path(__file__).resolve().parent)   # до тяжёлых библиотек: могла выйти версия новее
 
 import vp_integrations
+import vp_kokoro
 import vp_layout
 import vp_piper
 import vp_watchers
@@ -800,6 +801,7 @@ DB_PATH     = _find_board_db()
 AUDIO_DIR   = Path(tempfile.gettempdir()) / "voice-player-audio"
 ICON_PATH   = (APP_DIR / "icon.ico") if (APP_DIR / "icon.ico").exists() else (_RES_DIR / "icon.ico")
 _PIPER_OK   = vp_piper.is_available()
+_KOKORO_OK  = vp_kokoro.is_available()
 TTS_VOICE   = vp_piper.DEFAULT_VOICE if _PIPER_OK else "en-US-BrianMultilingualNeural"
 MANUAL_AUTHORS = {
     "Мой текст", "My Text", "Mi texto", "我的文本", "मेरा पाठ",
@@ -808,6 +810,8 @@ MANUAL_AUTHORS = {
 }
 # каталог голосов для выбора в UI: подпись → id (★ HD Multilingual / остальные edge-tts / piper)
 VOICES = {
+    # ★ Локальные HD-голоса Kokoro (StyleTTS2 ONNX — уровень Speechify, без серверов Microsoft)
+    **(vp_kokoro.VOICE_LABELS if _KOKORO_OK else {}),
     # ★ Флагманские HD-голоса (уровень Speechify / Copilot Multilingual — чёткая дикция RU + EN)
     "★ Brian HD — Мультиязычный (муж, чёткий)":        "en-US-BrianMultilingualNeural",
     "★ Andrew HD — Мультиязычный (муж, выразительный)": "en-US-AndrewMultilingualNeural",
@@ -1403,6 +1407,8 @@ def _synthesize(text: str, rate: str, mp3_path: "Path", voice: str = TTS_VOICE) 
     Если внутрипроцессный вызов падает — фолбэк в изолированный дочерний процесс.
     Локальный голос Piper всегда работает внутри процесса."""
     voice = voice or TTS_VOICE
+    if vp_kokoro.is_local(voice):
+        return vp_kokoro.synthesize(text, voice, mp3_path), []
     if vp_piper.is_local(voice):
         return vp_piper.synthesize(text, voice, mp3_path), []
     try:
@@ -1692,7 +1698,7 @@ def _synthesize_with_retries(text: str, rate: str, mp3_file: "Path", voice: str,
                              cancel_evt: Optional[threading.Event] = None) -> tuple:
     """Одна часть: (sents, words), либо RuntimeError после всех попыток."""
     last_err = "render failed"
-    is_local = vp_piper.is_local(voice)
+    is_local = vp_piper.is_local(voice) or vp_kokoro.is_local(voice)
     max_retries = 0 if is_local else 1
     for attempt in range(1, max_retries + 2):
         if cancel_evt is not None and cancel_evt.is_set():
@@ -2721,7 +2727,7 @@ class VoicePlayerApp:
         mode_vals = self._get_mode_values()
         self.var_mode.set(mode_vals[mode_idx])
         threading.Thread(target=self._update_loop, daemon=True, name="update").start()
-        if vp_piper.is_local(self._voice):  # голос в памяти заранее — первая реплика не ждёт загрузки
+        if vp_piper.is_local(self._voice) or vp_kokoro.is_local(self._voice):  # голос в памяти заранее — первая реплика не ждёт загрузки
             threading.Thread(target=self._preload_voice, args=(self._voice,), daemon=True, name="voice-preload").start()
 
         # Плеер: StreamPlayer (мгновенная скорость, тон сохраняется) если есть библиотеки,
@@ -4603,13 +4609,16 @@ class VoicePlayerApp:
 
     def _preload_voice(self, voice: str):
         try:
-            vp_piper.preload(voice)
+            if vp_kokoro.is_local(voice):
+                vp_kokoro.preload(voice)
+            else:
+                vp_piper.preload(voice)
         except Exception as e:
             log_line(f"voice preload {voice}: {e}")
 
     def _on_voice_change(self, _e=None):
         self._voice = VOICES.get(self.var_voice.get(), TTS_VOICE)
-        if vp_piper.is_local(self._voice):
+        if vp_piper.is_local(self._voice) or vp_kokoro.is_local(self._voice):
             threading.Thread(target=self._preload_voice, args=(self._voice,), daemon=True, name="voice-preload").start()
         for it in self.queue_items:
             if not it.deleted and not it.is_file and not it.played and it.rendered_voice:
@@ -10248,6 +10257,8 @@ def _self_test() -> int:
     import edge_tts, miniaudio, numpy, sounddevice  # noqa: F401
     if vp_piper.is_available():
         import piper, lameenc  # noqa: F401
+    if vp_kokoro.is_available():
+        import onnxruntime, ruaccent  # noqa: F401
     assert TTS_VOICE and VOICES and callable(render_audio_blocking)
     return 0
 
