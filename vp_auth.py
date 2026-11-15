@@ -43,12 +43,25 @@ def _read_secrets_env() -> dict[str, str]:
 
 _SECRETS = _read_secrets_env()
 
-# Заполняется своими значениями из Google Cloud Console (Desktop App OAuth Client)
-# и Supabase / Cloudflare Worker для сохранения базы email-адресов:
-GOOGLE_CLIENT_ID: str = os.environ.get("VP_GOOGLE_CLIENT_ID") or _SECRETS.get("VP_GOOGLE_CLIENT_ID", "")
-GOOGLE_CLIENT_SECRET: str = os.environ.get("VP_GOOGLE_CLIENT_SECRET") or _SECRETS.get("VP_GOOGLE_CLIENT_SECRET", "")
-LEAD_WEBHOOK_URL: str = os.environ.get("VP_LEAD_WEBHOOK_URL") or _SECRETS.get("VP_LEAD_WEBHOOK_URL", "")
-LEAD_WEBHOOK_KEY: str = os.environ.get("VP_LEAD_WEBHOOK_KEY") or _SECRETS.get("VP_LEAD_WEBHOOK_KEY", "")
+try:
+    import _vp_embedded_cfg as _EMB  # генерируется только при сборке VoicePlayer-Pro.exe
+except Exception:
+    _EMB = None
+
+
+def _cfg(key: str) -> str:
+    return (
+        os.environ.get(key)
+        or _SECRETS.get(key, "")
+        or (getattr(_EMB, key, "") if _EMB is not None else "")
+    )
+
+
+# Заполняется из окружения, ~/.voice-player-secrets.env или встроенного конфига Pro-сборки:
+GOOGLE_CLIENT_ID: str = _cfg("VP_GOOGLE_CLIENT_ID")
+GOOGLE_CLIENT_SECRET: str = _cfg("VP_GOOGLE_CLIENT_SECRET")
+LEAD_WEBHOOK_URL: str = _cfg("VP_LEAD_WEBHOOK_URL")
+LEAD_WEBHOOK_KEY: str = _cfg("VP_LEAD_WEBHOOK_KEY")
 
 
 def set_logger(fn) -> None:

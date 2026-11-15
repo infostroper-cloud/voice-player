@@ -4155,7 +4155,8 @@ class VoicePlayerApp:
         ttk.Separator(t4, orient="horizontal").grid(row=10, column=0, columnspan=2, sticky="ew", pady=(12, 8))
         acc = vp_auth.load_account()
         acc_txt = acc.get("email") or "Не выполнен"
-        ttk.Label(t4, text=f"Аккаунт: {acc_txt}", style="TLabel").grid(row=11, column=0, sticky="w")
+        self._lbl_account_status = ttk.Label(t4, text=f"Аккаунт: {acc_txt}", style="TLabel")
+        self._lbl_account_status.grid(row=11, column=0, sticky="w")
         ttk.Button(t4, text="Войти через Google / Аккаунт",
                    command=lambda: self._open_account_dialog(first_run=False)).grid(row=11, column=1, sticky="w")
 
@@ -4258,7 +4259,13 @@ class VoicePlayerApp:
                     if not win.winfo_exists():
                         return
                     if ok:
-                        self._set_status(f"вход выполнен: {profile.get('email', '')}", ok=True)
+                        em = profile.get("email", "")
+                        self._set_status(f"вход выполнен: {em}", ok=True)
+                        try:
+                            if getattr(self, "_lbl_account_status", None) and self._lbl_account_status.winfo_exists():
+                                self._lbl_account_status.config(text=f"Аккаунт: {em or 'Выполнен'}")
+                        except Exception:
+                            pass
                         win.destroy()
                     else:
                         lbl_status.config(text=f"Ошибка Google OAuth: {err}")
@@ -4283,6 +4290,11 @@ class VoicePlayerApp:
                 app_version=APP_VERSION,
             )
             self._set_status(f"аккаунт сохранён: {em}", ok=True)
+            try:
+                if getattr(self, "_lbl_account_status", None) and self._lbl_account_status.winfo_exists():
+                    self._lbl_account_status.config(text=f"Аккаунт: {em}")
+            except Exception:
+                pass
             win.destroy()
 
         def do_skip():
