@@ -1636,6 +1636,42 @@ def _has_local_fallback_voice(voice: str) -> bool:
     return bool(_find_local_fallback_voice())
 
 
+_EDGE_LOCK = threading.Lock()
+_EDGE_FAIL_THRESHOLD = 2
+_EDGE_COOLDOWN_S = 180.0
+_edge_fail_streak = 0
+_edge_cooldown_until = 0.0
+
+
+def _edge_in_cooldown() -> bool:
+    with _EDGE_LOCK:
+        return time.time() < _edge_cooldown_until
+
+
+def _reset_edge_cooldown() -> None:
+    global _edge_fail_streak, _edge_cooldown_until
+    with _EDGE_LOCK:
+        _edge_fail_streak = 0
+        _edge_cooldown_until = 0.0
+
+
+def _note_edge_success() -> None:
+    _reset_edge_cooldown()
+
+
+def _note_edge_failure() -> bool:
+    global _edge_fail_streak, _edge_cooldown_until
+    with _EDGE_LOCK:
+        _edge_fail_streak += 1
+        if _edge_fail_streak >= _EDGE_FAIL_THRESHOLD:
+            was_cooling = time.time() < _edge_cooldown_until
+            _edge_cooldown_until = time.time() + _EDGE_COOLDOWN_S
+            if not was_cooling:
+                log_line(f"edge-tts cooldown {int(_EDGE_COOLDOWN_S)}s -> instant local Piper")
+            return True
+        return False
+
+
 def generate_supporter_key(seed: str = "") -> str:
     """Сгенерировать офлайн-ключ Supporter формата VP-PRO-XXXX-XXXX-CCCC."""
     import hashlib
@@ -1658,14 +1694,21 @@ def verify_supporter_key(key: str) -> bool:
     return sig == expected
 
 
-def _synthesize_with_retries(text: str, rate: str, mp3_file: "Path", voice: str, item_id: str) -> tuple:
+def _synthesize_with_retries(text: str, rate: str, mp3_file: "Path", voice: str, item_id: str,
+                             cancel_evt: Optional[threading.Event] = None) -> tuple:
     """Одна часть: (sents, words), либо RuntimeError после всех попыток."""
     last_err = "render failed"
-    max_retries = 0 if vp_piper.is_local(voice) else TTS_RETRIES
+    is_local = vp_piper.is_local(voice)
+    has_local = (not is_local) and _has_local_fallback_voice(voice)
+    max_retries = 0 if is_local else (1 if has_local else 2)
     for attempt in range(1, max_retries + 2):
+        if cancel_evt is not None and cancel_evt.is_set():
+            raise RuntimeError("cancelled")
         try:
             sents, words = _synthesize(text, rate, mp3_file, voice)
             if mp3_file.exists() and mp3_file.stat().st_size > 0:
+                if not is_local:
+                    _note_edge_success()
                 if attempt > 1:
                     log_line(f"render OK [{item_id}] attempt={attempt} text='{text[:60]}'")
                 return sents, words
@@ -1677,9 +1720,18 @@ def _synthesize_with_retries(text: str, rate: str, mp3_file: "Path", voice: str,
                     mp3_file.unlink()
             except OSError:
                 pass
+        if cancel_evt is not None and cancel_evt.is_set():
+            raise RuntimeError("cancelled")
         log_line(f"render FAIL [{item_id}] {mp3_file.stem} attempt={attempt}/{max_retries+1}: {last_err}")
+        if not is_local and _note_edge_failure() and has_local:
+            break
         if attempt <= max_retries:
-            time.sleep(min(TTS_RETRY_DELAY_S * attempt, 3.0))
+            delay = 0.4 if has_local else min(TTS_RETRY_DELAY_S * attempt, 2.5)
+            if cancel_evt is not None:
+                if cancel_evt.wait(delay):
+                    raise RuntimeError("cancelled")
+            else:
+                time.sleep(delay)
     try:
         if mp3_file.exists() and mp3_file.stat().st_size == 0:
             mp3_file.unlink()
@@ -1729,6 +1781,13 @@ def render_audio_blocking(item: Item, rate: str = TTS_RATE, voice: str = TTS_VOI
         item.audio_error = "пустой текст"
         log_line(f"render skip [{item.id}]: no speakable text")
         return
+    if not vp_piper.is_local(voice) and _edge_in_cooldown():
+        fast_piper = _find_local_fallback_voice(body)
+        if fast_piper:
+            voice = fast_piper
+            if not item.parts_done:
+                item.rendered_voice = fast_piper
+
     mp3_file = AUDIO_DIR / f"{item.id}.mp3"
     if not item.parts_done:
         item.marks = []; item.word_marks = []
@@ -1748,8 +1807,9 @@ def render_audio_blocking(item: Item, rate: str = TTS_RATE, voice: str = TTS_VOI
         # lead (имя автора голосом) звучит перед телом; тайминги маппим по телу, лид в них не попадёт
         return (lead.rstrip(". ") + ".\n" + chunk) if (lead and i == 0) else chunk
 
+    cancel_evt = threading.Event()
     with ThreadPoolExecutor(max_workers=TTS_PARALLEL_PARTS, thread_name_prefix="tts-part") as pool:
-        futures = {i: pool.submit(_synthesize_with_retries, part_text(i), rate, part_file(i), voice, item.id)
+        futures = {i: pool.submit(_synthesize_with_retries, part_text(i), rate, part_file(i), voice, item.id, cancel_evt)
                    for i in range(done, len(spans))}
         try:
             for i in range(done, len(spans)):
@@ -1771,6 +1831,7 @@ def render_audio_blocking(item: Item, rate: str = TTS_RATE, voice: str = TTS_VOI
                     item.audio_ready = True          # уже можно играть — остальное догрузится
                     on_part(item)
         except Exception as e:
+            cancel_evt.set()
             for f in futures.values():
                 f.cancel()
             item.audio_error = str(e)[:300] or "render failed"
@@ -7143,8 +7204,9 @@ class VoicePlayerApp:
                 self._sync_parts(item)
                 cur_it = self.queue_items[self.current_idx] if 0 <= self.current_idx < len(self.queue_items) else None
                 with self._parts_lock:
-                    if ((item is self._loaded_item and item.parts_fed >= len(item.parts_done))
-                            or (item is not self._loaded_item and item is not cur_it)):
+                    if (Path(item.audio_path) == AUDIO_DIR / f"{item.id}.mp3"
+                            and ((item is self._loaded_item and item.parts_fed >= len(item.parts_done))
+                                 or (item is not self._loaded_item and item is not cur_it))):
                         _cleanup_rendered_parts(item, Path(item.audio_path))
             if item.audio_error and not self._maybe_auto_retry(item):
                 item.more_parts = False                  # повторов не будет — отыграть то, что есть
@@ -7563,6 +7625,7 @@ class VoicePlayerApp:
             self._retry_render(self.queue_items[idx])
 
     def _retry_render(self, item: Item):
+        _reset_edge_cooldown()
         self._reset_render_state(item)
         log_line(f"manual retry [{item.id}] text='{item.text[:60]}'")
         self._q_put(item, 50)
@@ -7570,6 +7633,7 @@ class VoicePlayerApp:
 
     def _retry_all_failed(self):
         """Перерендерить все реплики со знаком ⚠ (упавшие)."""
+        _reset_edge_cooldown()
         failed = [it for it in self.queue_items if it.audio_error and not it.audio_ready and not it.deleted]
         for it in failed:
             self._reset_render_state(it)
