@@ -108,8 +108,27 @@ class Layout(unittest.TestCase):
         self.assertGreater(len(spans), 3)
         self.assertEqual("".join(body[a:b] for a, b in spans), body)
         self.assertLessEqual(spans[0][1] - spans[0][0], app.TTS_FIRST_PART_CHARS)
+        self.assertLessEqual(spans[1][1] - spans[1][0], app.TTS_SECOND_PART_CHARS)
         self.assertTrue(all(b - a <= app.TTS_PART_CHARS for a, b in spans))
         self.assertEqual(app._split_for_tts("короткий"), [(0, 8)])
+
+    def test_split_staircase_and_trailing_punct_merge(self):
+        import app
+        body = "\n".join(
+            f"Предложение номер {i} содержит достаточное количество символов для проверки лестницы."
+            for i in range(40)
+        )
+        spans = app._split_for_tts(body)
+        self.assertEqual("".join(body[a:b] for a, b in spans), body)
+        self.assertGreaterEqual(len(spans), 4)
+        self.assertLessEqual(spans[0][1] - spans[0][0], app.TTS_FIRST_PART_CHARS)
+        self.assertLessEqual(spans[1][1] - spans[1][0], app.TTS_SECOND_PART_CHARS)
+        self.assertTrue(all(b - a <= app.TTS_PART_CHARS for a, b in spans[2:]))
+
+        tail_txt = ("Слово " * 36) + "..."
+        tail_spans = app._split_for_tts(tail_txt)
+        self.assertEqual("".join(tail_txt[a:b] for a, b in tail_spans), tail_txt)
+        self.assertTrue(all(any(ch.isalnum() for ch in tail_txt[a:b]) for a, b in tail_spans))
 
 
 class RenderParts(unittest.TestCase):
@@ -221,6 +240,23 @@ class RenderParts(unittest.TestCase):
 
         stream_def = self.app.Item(id="s2", source="codex", author="Codex", time_str="", text="Hi", raw_text="Hi")
         self.assertEqual(self.app._resolve_item_voice(stream_def, author_voices, default_v), default_v)
+
+    def test_cleanup_rendered_parts_updates_state(self):
+        item = self.item()
+        p0 = Path(self.tmp.name) / "x.p000.mp3"
+        p1 = Path(self.tmp.name) / "x.p001.mp3"
+        full = Path(self.tmp.name) / "x.mp3"
+        p0.write_bytes(b"p0")
+        p1.write_bytes(b"p1")
+        full.write_bytes(b"full")
+        item.parts_done = [p0, p1]
+        item.parts_fed = 2
+        self.app._cleanup_rendered_parts(item, full)
+        self.assertFalse(p0.exists())
+        self.assertFalse(p1.exists())
+        self.assertTrue(full.exists())
+        self.assertEqual(item.parts_done, [full])
+        self.assertEqual(item.parts_fed, 1)
 
 
 class Integrations(unittest.TestCase):

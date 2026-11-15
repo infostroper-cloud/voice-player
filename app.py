@@ -765,9 +765,10 @@ TTS_RATE    = "+0%"   # нейтрально: скорость регулиру�
 TTS_TIMEOUT_S = 90    # верхний предел: edge-tts временами отдаёт звук медленно, не убиваем живой рендер
                       # (реальные обрывы дочерний процесс ловит сам через connect/receive_timeout ~18с)
 TTS_RETRIES   = 1
-TTS_FIRST_PART_CHARS = 140   # первая часть короткая (как в Speechify): звук начинается уже через 0.3–0.5 с
-TTS_PART_CHARS = 700         # остальные части: каждая с запасом успевает в TTS_TIMEOUT_S
-TTS_PARALLEL_PARTS = 3       # части одной реплики озвучиваем параллельно, чтобы звук не догонял рендер
+TTS_FIRST_PART_CHARS = 220   # первая часть (~8–12 с звука): быстрый старт + запас времени для рендера 2-й части
+TTS_SECOND_PART_CHARS = 380  # вторая часть: плавный разгон буфера без паузы после 1-й части
+TTS_PART_CHARS = 600         # остальные части: каждая быстро рендерится без сетевого троттлинга
+TTS_PARALLEL_PARTS = 2       # 2 потока: 1-я и 2-я части идут параллельно без таймаутов от Microsoft
 TTS_RETRY_DELAY_S = 2.0
 TTS_AUTO_RETRY     = 3      # авто-повтор упавших по таймауту реплик (самолечение при сбое сети)
 TTS_AUTO_RETRY_BASE_S = 20 # задержка авто-повтора нарастает: 20с, 40с, 60с (предохранитель от шторма)
@@ -1273,16 +1274,19 @@ asyncio.run(run())
 
 
 def _synthesize(text: str, rate: str, mp3_path: "Path", voice: str = TTS_VOICE) -> tuple:
-    """Озвучить text. Основной путь — ОТДЕЛЬНЫЙ python-процесс: каждый рендер в чистом
-    изолированном процессе (как standalone, который работает всегда), без зависаний из-за
-    состояния/потоков/GIL живого приложения. В собранном .exe отдельного python нет —
-    тогда фолбэк на внутрипроцессную озвучку. Локальный голос Piper работает внутри процесса:
-    сети нет, а модель долго загружать на каждую часть."""
+    """Озвучить text. Основной путь для Edge TTS — внутри процесса с переиспользуемым
+    SelectorEventLoop (_synthesize_inproc), без задержки на холодный старт python.exe (~0.5с на часть).
+    Если внутрипроцессный вызов падает — фолбэк в изолированный дочерний процесс.
+    Локальный голос Piper всегда работает внутри процесса."""
     voice = voice or TTS_VOICE
     if vp_piper.is_local(voice):
         return vp_piper.synthesize(text, voice, mp3_path), []
-    if getattr(sys, "frozen", False):
+    try:
         return _synthesize_inproc(text, rate, mp3_path, voice)
+    except Exception as e:
+        if getattr(sys, "frozen", False) or type(e).__name__ == "NoAudioReceived":
+            raise
+        log_line(f"tts inproc fallback ({voice}): {type(e).__name__}: {e}"[:200])
 
     import subprocess, json
     txt_path = mp3_path.with_suffix(".in.txt")
@@ -1447,32 +1451,60 @@ def _map_marks_to_chars(text: str, sents: list) -> list:
 
 
 def _split_for_tts(body: str) -> list:
-    """Разрезать текст на части [(начало, конец)]: по строкам (строка таблицы остаётся целой),
-    иначе по предложениям. Первая часть короткая (~120–140 символов) — чтобы быстрее зазвучать,
-    как в Speechify."""
+    """Разрезать текст на части [(начало, конец)]: плавный старт без паузы после 1-й части.
+    Первая часть ~120–220 символов, вторая ~380, остальные по TTS_PART_CHARS; хвосты без букв/цифр склеиваются."""
     out, a, n = [], 0, len(body)
-    limit = TTS_FIRST_PART_CHARS
-    while n - a > limit:
+    part_idx = 0
+
+    def _limit_for(idx: int) -> int:
+        if idx == 0:
+            return TTS_FIRST_PART_CHARS
+        if idx == 1:
+            return TTS_SECOND_PART_CHARS
+        return TTS_PART_CHARS
+
+    while n - a > _limit_for(part_idx):
+        limit = _limit_for(part_idx)
         win = body[a:a + limit]
         cut = limit
+        min_cut = int(limit * (0.55 if part_idx == 0 else 0.35))
         found = False
         for sep in ("\n", ". ", "! ", "? ", "… ", ";\n"):
             p = win.rfind(sep)
-            if p >= int(limit * 0.35):
+            if p >= min_cut:
                 cut = p + len(sep)
                 found = True
                 break
         if not found:
             for sep in ("; ", ", ", " "):
                 p = win.rfind(sep)
-                if p >= int(limit * 0.35):
+                if p >= min_cut:
                     cut = p + len(sep)
                     break
         out.append((a, a + cut))
         a += cut
-        limit = TTS_PART_CHARS
+        part_idx += 1
     if a < n:
-        out.append((a, n))
+        if out and not any(ch.isalnum() for ch in body[a:n]):
+            pa, pb = out[-1]
+            prev_limit = _limit_for(len(out) - 1)
+            cur_limit = _limit_for(len(out))
+            if n - pa <= prev_limit:
+                out[-1] = (pa, n)
+            else:
+                split_pos = None
+                if n - pb < cur_limit and any(ch.isalnum() for ch in body[pa:pb]):
+                    search_from = max(0, (n - cur_limit) - pa)
+                    pos = body[pa:pb].rfind(" ", search_from, max(search_from, pb - pa - 1))
+                    if pos > 0 and any(ch.isalnum() for ch in body[pa:pa + pos]) and any(ch.isalnum() for ch in body[pa + pos:n]):
+                        split_pos = pa + pos + 1
+                if split_pos is not None:
+                    out[-1] = (pa, split_pos)
+                    out.append((split_pos, n))
+                else:
+                    out.append((a, n))
+        else:
+            out.append((a, n))
     return out
 
 
@@ -1538,14 +1570,18 @@ def _synthesize_with_retries(text: str, rate: str, mp3_file: "Path", voice: str,
 
 
 def _cleanup_rendered_parts(item: "Item", keep_path: Path):
-    """Удалить временные файлы кусков (.pXXX.mp3), сохранив список parts_done."""
+    """Удалить временные файлы кусков (.pXXX.mp3) и оставить в parts_done только целый файл."""
+    keep_p = Path(keep_path)
     for p in getattr(item, "parts_done", ()):
         try:
             pp = Path(p)
-            if pp != keep_path:
+            if pp != keep_p:
                 pp.unlink(missing_ok=True)
         except Exception:
             pass
+    if keep_p.exists():
+        item.parts_done = [keep_p]
+        item.parts_fed = 1
 
 
 def render_audio_blocking(item: Item, rate: str = TTS_RATE, voice: str = TTS_VOICE,
@@ -1555,7 +1591,7 @@ def render_audio_blocking(item: Item, rate: str = TTS_RATE, voice: str = TTS_VOI
     всего). Упала часть — готовые остаются, повтор продолжит с места сбоя."""
     from concurrent.futures import ThreadPoolExecutor
     body = _clean_for_tts(item.text)
-    if not body:
+    if not body or not any(ch.isalnum() for ch in body):
         item.audio_error = "пустой текст"
         log_line(f"render skip [{item.id}]: empty text")
         return
@@ -1569,7 +1605,11 @@ def render_audio_blocking(item: Item, rate: str = TTS_RATE, voice: str = TTS_VOI
         else:
             voice = TTS_VOICE
 
-    spans = _split_for_tts(body)
+    spans = [(a, b) for a, b in _split_for_tts(body) if any(ch.isalnum() for ch in body[a:b])]
+    if not spans:
+        item.audio_error = "пустой текст"
+        log_line(f"render skip [{item.id}]: no speakable text")
+        return
     mp3_file = AUDIO_DIR / f"{item.id}.mp3"
     if not item.parts_done:
         item.marks = []; item.word_marks = []
@@ -2471,6 +2511,7 @@ class VoicePlayerApp:
         self._render_seq = 0
         self._render_seq_lock = threading.Lock()
         self._parts_lock = threading.Lock()     # порядок частей при дозагрузке в плеер
+        self._sync_append_lock = threading.Lock()  # сериализация append_file вне основного _parts_lock
         self._loaded_item = None                # какая реплика сейчас загружена в плеер
         self._loaded_gen = 0
         self._net_offline = False               # для спокойного, не пугающего статуса при потере сети
@@ -4623,9 +4664,9 @@ class VoicePlayerApp:
             return
         author = self.queue_items[idx].author          # оригинальное имя (ключ, не меняется)
         cur = self._author_names.get(author, "")
-        win = tk.Toplevel(self.root); win.title("Переименовать автора")
-        c = self.colors; win.transient(self.root); win.configure(bg=c["bg"]); win.grab_set()
-        self._center_over_root(win, 380, 170)
+        c = self.colors
+        win = tk.Toplevel(self.root, bg=c["bg"]); win.title("Переименовать автора")
+        win.transient(self.root); self._center_over_root(win, 380, 170); win.grab_set()
         ttk.Label(win, text=f"Оригинальное имя: {author}", style="Dim.TLabel").pack(anchor="w", padx=14, pady=(14, 2))
         ttk.Label(win, text="Показывать как:", style="TLabel").pack(anchor="w", padx=14, pady=(6, 4))
         var = tk.StringVar(value=cur)
@@ -4657,7 +4698,8 @@ class VoicePlayerApp:
     def _edit_author_names(self):
         """Редактор всех сохранённых имён авторов (набор переживает перезагрузку)."""
         c = self.colors
-        win = tk.Toplevel(self.root); win.title("Имена авторов"); win.configure(bg=c["bg"])
+        win = tk.Toplevel(self.root, bg=c["bg"]); win.title("Имена авторов")
+        win.transient(self.root)
         self._center_over_root(win, 460, max(380, self.root.winfo_height()))
         win.minsize(360, 300)
         ttk.Label(win, text="Каждая строка: оригинал = как показывать\nНапример:  Claude/323b5065 = Семён",
@@ -4712,10 +4754,10 @@ class VoicePlayerApp:
         is_manual = _is_manual_item(item)
         cur_vid = item.custom_voice if is_manual else self._author_voices.get(author, "")
         cur = next((k for k, v in VOICES.items() if v == cur_vid), "")
-        win = tk.Toplevel(self.root)
+        c = self.colors
+        win = tk.Toplevel(self.root, bg=c["bg"])
         win.title("Голос для реплики" if is_manual else "Голос для потока / автора")
-        c = self.colors; win.transient(self.root); win.configure(bg=c["bg"]); win.grab_set()
-        self._center_over_root(win, 420, 165)
+        win.transient(self.root); self._center_over_root(win, 420, 165); win.grab_set()
         lbl_txt = (
             "Голос только для этой вставленной реплики (по умолчанию всегда используется основной диктор):"
             if is_manual else f"Голос для потока / автора «{author}»:"
@@ -5376,8 +5418,8 @@ class VoicePlayerApp:
 
     def _edit_pronounce(self):
         c = self.colors
-        win = tk.Toplevel(self.root); win.title("Словарь произношения")
-        win.transient(self.root); win.configure(bg=c["bg"])
+        win = tk.Toplevel(self.root, bg=c["bg"]); win.title("Словарь произношения")
+        win.transient(self.root)
         self._center_over_root(win, 460, max(420, self.root.winfo_height()))
         win.minsize(380, 320)
 
@@ -5423,8 +5465,8 @@ class VoicePlayerApp:
     # ------------------ архив (поиск/повторное открытие) ------------------
     def _open_archive(self):
         c = self.colors
-        win = tk.Toplevel(self.root); win.title("Архив реплик")
-        win.transient(self.root); win.configure(bg=c["bg"]); self._center_over_root(win, 760, 480)
+        win = tk.Toplevel(self.root, bg=c["bg"]); win.title("Архив реплик")
+        win.transient(self.root); self._center_over_root(win, 760, 480)
         top = ttk.Frame(win); top.pack(fill="x", padx=10, pady=8)
         ttk.Label(top, text="Поиск:", style="Dim.TLabel").pack(side="left")
         q = tk.StringVar(); ent = ttk.Entry(top, textvariable=q)
@@ -5478,11 +5520,7 @@ class VoicePlayerApp:
     # ------------------ плейлисты (именованные очереди) ------------------
     def _open_settings(self, select_tab: str = ""):
         c = self.colors
-        win = tk.Toplevel(self.root); win.title(vp_i18n.t("settings"))
-        self._apply_window_titlebar_theme(win, c)
-        win.after(30, lambda w=win: self._apply_window_titlebar_theme(w))
-        win.after(150, lambda w=win: self._apply_window_titlebar_theme(w))
-        win.bind("<Map>", lambda e, w=win: self._apply_window_titlebar_theme(w), add="+")
+        win = tk.Toplevel(self.root, bg=c["bg"]); win.title(vp_i18n.t("settings"))
 
         tab_titles = [
             vp_i18n.t("tab_playback"),
@@ -5496,7 +5534,7 @@ class VoicePlayerApp:
         needed_w = sum(len(t) * 9 + 32 for t in tab_titles) + 60
         win_w = max(940, min(1200, needed_w + 60))
         win_h = 580
-        win.transient(self.root); win.configure(bg=c["bg"]); self._center_over_root(win, win_w, win_h)
+        win.transient(self.root); self._center_over_root(win, win_w, win_h)
         win.minsize(940, 560)
         win.resizable(True, True)
 
@@ -5758,8 +5796,8 @@ class VoicePlayerApp:
     def _open_playlists(self):
         c = self.colors
         pl = playlists_load()
-        win = tk.Toplevel(self.root); win.title("Плейлисты")
-        win.transient(self.root); win.configure(bg=c["bg"]); self._center_over_root(win, 360, 380)
+        win = tk.Toplevel(self.root, bg=c["bg"]); win.title("Плейлисты")
+        win.transient(self.root); self._center_over_root(win, 360, 380)
         ttk.Label(win, text="Сохранённые очереди:", style="Dim.TLabel").pack(anchor="w", padx=12, pady=(10, 4))
         lb = tk.Listbox(win, bg=c["panel"], fg=c["ink"], highlightthickness=0, bd=0,
                         font=("Segoe UI", 11), selectbackground=c["sel"], selectforeground=c["ink"])
@@ -5798,8 +5836,8 @@ class VoicePlayerApp:
 
     def _ask_text(self, title, prompt):
         c = self.colors
-        win = tk.Toplevel(self.root); win.title(title)
-        win.transient(self.root); win.grab_set(); win.configure(bg=c["bg"]); self._center_over_root(win, 340, 140)
+        win = tk.Toplevel(self.root, bg=c["bg"]); win.title(title)
+        win.transient(self.root); self._center_over_root(win, 340, 140); win.grab_set()
         ttk.Label(win, text=prompt, style="TLabel").pack(anchor="w", padx=14, pady=(14, 6))
         var = tk.StringVar()
         e = ttk.Entry(win, textvariable=var); e.pack(fill="x", padx=14); e.focus_set()
@@ -6751,12 +6789,11 @@ class VoicePlayerApp:
                             prev.text = clean
                             if title and not prev.title:
                                 prev.title = title
-                            prev.audio_path = None
-                            prev.audio_ready = False
+                            self._reset_render_state(prev)
                             if 0 <= self.current_idx < len(self.queue_items) and self.queue_items[self.current_idx] is prev:
                                 try: self.player.stop()
                                 except Exception: pass
-                                self.root.after(50, lambda p=prev: self.play_item(p))
+                                self.root.after(50, lambda p=prev: self._play_index(self.queue_items.index(p)) if p in self.queue_items else None)
                             self._save_session()
                             self.root.after(0, self._request_render)
                             return prev
@@ -6956,8 +6993,10 @@ class VoicePlayerApp:
                     self._rendering_item_id = None
             if not item.audio_error and not item.more_parts and len(item.parts_done) > 1 and item.audio_path:
                 self._sync_parts(item)
+                cur_it = self.queue_items[self.current_idx] if 0 <= self.current_idx < len(self.queue_items) else None
                 with self._parts_lock:
-                    if item is not self._loaded_item or item.parts_fed >= len(item.parts_done):
+                    if ((item is self._loaded_item and item.parts_fed >= len(item.parts_done))
+                            or (item is not self._loaded_item and item is not cur_it)):
                         _cleanup_rendered_parts(item, Path(item.audio_path))
             if item.audio_error and not self._maybe_auto_retry(item):
                 item.more_parts = False                  # повторов не будет — отыграть то, что есть
@@ -7041,6 +7080,13 @@ class VoicePlayerApp:
         если реплика запрошена или плеер свободен в режиме автоплея — запускаем звук сразу."""
         if self.user_paused or self._dnd_active():
             return
+        with self._parts_lock:
+            already_loaded = (self._loaded_item is item)
+            need_sync = already_loaded and (item.parts_fed < len(item.parts_done))
+        if already_loaded and self.player.has_track():
+            if need_sync:
+                threading.Thread(target=self._sync_parts, args=(item,), daemon=True, name="parts").start()
+            return
         if self.player.is_playing():
             return
         # 1. Если текущий индекс указывает на эту реплику (была запрошена, но ждала рендера)
@@ -7049,6 +7095,12 @@ class VoicePlayerApp:
                 self._play_index(self.current_idx)
             return
 
+        # Не переключаем на следующую реплику, пока текущая ещё дорендеривает части
+        if 0 <= self.current_idx < len(self.queue_items):
+            cur = self.queue_items[self.current_idx]
+            if self._loaded_item is cur and self.player.has_track() and cur.more_parts:
+                return
+
         # 2. Если плеер свободен и включен автоплей
         if self.var_autoplay.get():
             target_idx = self._auto_next_index() if self.current_idx >= 0 else self._find_next(0)
@@ -7056,20 +7108,29 @@ class VoicePlayerApp:
                 self._play_index(target_idx)
 
     def _sync_parts(self, item: Item):
-        with self._parts_lock:
-            if item is not self._loaded_item:
-                return
-            gen = self._loaded_gen
-            added = False
-            for path in item.parts_done[item.parts_fed:]:
+        added = False
+        with self._sync_append_lock:
+            while True:
+                with self._parts_lock:
+                    if item is not self._loaded_item:
+                        break
+                    if item.parts_fed >= len(item.parts_done):
+                        break
+                    fed_idx = item.parts_fed
+                    path = item.parts_done[fed_idx]
+                    gen = self._loaded_gen
                 try:
                     if not self.player.append_file(path, gen):
-                        return
+                        break
                 except Exception as e:
                     log_line(f"append part [{item.id}]: {e}")
-                    return
-                item.parts_fed += 1
-                added = True
+                    break
+                with self._parts_lock:
+                    if item is not self._loaded_item or self._loaded_gen != gen:
+                        break
+                    if item.parts_fed == fed_idx:
+                        item.parts_fed += 1
+                        added = True
         if added:
             self.root.after(0, lambda it=item: self._refresh_wave(it))
 
@@ -7262,12 +7323,21 @@ class VoicePlayerApp:
         try:
             self.player.set_volume(self.var_volume.get())
             with self._parts_lock:
+                full_p = AUDIO_DIR / f"{item.id}.mp3"
+                use_full = False
+                try:
+                    use_full = not item.more_parts and full_p.exists() and full_p.stat().st_size > 0
+                except Exception:
+                    use_full = False
+                if use_full:
+                    item.audio_path = str(full_p)
+                    _cleanup_rendered_parts(item, full_p)
                 path = item.audio_path
                 self.player.load_and_play(path, speed=self._speed_mult())
                 self._loaded_item = item
                 self._loaded_gen = self.player.generation() if hasattr(self.player, "generation") else 0
                 # готовый целый файл — дозагружать нечего; иначе играем первую часть и дописываем
-                first = item.parts_done and path == item.parts_done[0]
+                first = (not use_full) and bool(item.parts_done and path == item.parts_done[0] and (item.more_parts or len(item.parts_done) > 1))
                 item.parts_fed = 1 if first else len(item.parts_done)
             if first:
                 threading.Thread(target=self._sync_parts, args=(item,), daemon=True, name="parts").start()
@@ -8434,12 +8504,11 @@ class VoicePlayerApp:
             win.focus_force()
             return
         cc = getattr(self, "colors", None) or self._palette(self.var_theme.get())
-        w = tk.Toplevel(self.root)
+        w = tk.Toplevel(self.root, bg=cc["panel"])
         self._support_win = w
         w.title(vp_i18n.t("about_win_title"))
-        w.configure(bg=cc["panel"])
-        self._center_over_root(w, 590, 440)
         w.transient(self.root)
+        self._center_over_root(w, 590, 440)
 
         box = ttk.Frame(w, padding=18)
         box.pack(fill="both", expand=True)
@@ -8555,33 +8624,25 @@ class VoicePlayerApp:
             win.focus_force()
             return
         cc = getattr(self, "colors", None) or self._palette(self.var_theme.get())
-        w = tk.Toplevel(self.root)
+        w = tk.Toplevel(self.root, bg=cc["panel"])
         self._ai_win = w
         w.title(vp_i18n.t("ai_connect_title"))
-        w.configure(bg=cc["panel"])
-        self._center_over_root(w, 720, 560)
         w.transient(self.root)
-        self._apply_window_titlebar_theme(w, cc)
+        self._center_over_root(w, 720, 560)
         container = ttk.Frame(w, padding=16, style="Panel.TFrame")
         container.pack(fill="both", expand=True)
         self._build_ai_tab(container)
 
     def _show_ai_setup_dialog(self, tool):
-        w = tk.Toplevel(self.root)
-        w.title(vp_i18n.t("guide_title", tool=tool['label']))
-        is_gui = bool(tool.get("is_gui_app", False))
-        win_w, win_h = (580, 320) if is_gui else (520, 260)
-        w.geometry(f"{win_w}x{win_h}")
-        self._center_over_root(w, win_w, win_h)
-        w.transient(self.root)
-        self._apply_window_titlebar_theme(w)
-        w.after(30, lambda: self._apply_window_titlebar_theme(w))
-        w.bind("<Map>", lambda e: self._apply_window_titlebar_theme(w), add="+")
-
         c = getattr(self, "colors", {})
         panel_bg = getattr(self, "col_panel", "#131615")
         panel2_bg = c.get("panel2", "#1c211f")
-        w.configure(bg=panel_bg)
+        w = tk.Toplevel(self.root, bg=panel_bg)
+        w.title(vp_i18n.t("guide_title", tool=tool['label']))
+        is_gui = bool(tool.get("is_gui_app", False))
+        win_w, win_h = (580, 320) if is_gui else (520, 260)
+        w.transient(self.root)
+        self._center_over_root(w, win_w, win_h)
         f = ttk.Frame(w, padding=20, style="Panel.TFrame")
         f.pack(fill="both", expand=True)
         ttk.Label(f, text=f"{tool.get('icon', '🤖')} {tool['label']}", font=("Segoe UI Semibold", 13)).pack(anchor="w")
@@ -9435,7 +9496,20 @@ class VoicePlayerApp:
 
     def _center_over_root(self, win, w: int, h: int):
         """Открыть всплывающее окно ровно по центру над главным окном плеера
-        (а не «где попало»). Размер задаём здесь же одной строкой geometry."""
+        (а не «где попало»). Размер задаём здесь же одной строкой geometry.
+        В тёмной теме держим alpha=0.0 до упаковки виджетов и окраски заголовка,
+        чтобы убрать белую вспышку при показе окна."""
+        pal = getattr(self, "colors", None) or self._palette(self.var_theme.get())
+        try:
+            cur_bg = str(win.cget("bg") or "").lower()
+            if not cur_bg or cur_bg.startswith("system") or cur_bg in ("#f0f0f0", "white", "#ffffff"):
+                win.configure(bg=pal["bg"])
+        except Exception:
+            pass
+        try:
+            win.attributes("-alpha", 0.0)
+        except Exception:
+            pass
         try:
             self.root.update_idletasks()
             rx, ry = self.root.winfo_x(), self.root.winfo_y()
@@ -9445,13 +9519,27 @@ class VoicePlayerApp:
             win.geometry(f"{w}x{h}+{x}+{y}")
         except Exception:
             win.geometry(f"{w}x{h}")
-        self._apply_window_titlebar_theme(win)
+        self._apply_window_titlebar_theme(win, pal)
+
+        def _reveal(w_ref=win, p=pal):
+            try:
+                if not w_ref.winfo_exists():
+                    return
+                w_ref.update_idletasks()
+                self._apply_window_titlebar_theme(w_ref, p)
+                w_ref.attributes("-alpha", 1.0)
+            except Exception:
+                try:
+                    w_ref.attributes("-alpha", 1.0)
+                except Exception:
+                    pass
+
         try:
-            win.after(25, lambda w=win: self._apply_window_titlebar_theme(w))
-            win.after(120, lambda w=win: self._apply_window_titlebar_theme(w))
-            win.bind("<Map>", lambda e, w=win: self._apply_window_titlebar_theme(w), add="+")
+            win.after(15, _reveal)
+            win.after(120, lambda w=win, p=pal: self._apply_window_titlebar_theme(w, p))
+            win.bind("<Map>", lambda e, w=win, p=pal: self._apply_window_titlebar_theme(w, p), add="+")
         except Exception:
-            pass
+            _reveal()
 
     def _open_list_menu(self):
         """Открыть выпадающее меню «⋮» с действиями над списком под кнопкой."""
@@ -9659,11 +9747,10 @@ class VoicePlayerApp:
     def _show_shortcuts_dialog(self):
         """Красивое всплывающее окно со всеми горячими клавишами VoicePlayer."""
         c = self.colors
-        w = tk.Toplevel(self.root)
+        w = tk.Toplevel(self.root, bg=c["bg"])
         w.title(vp_i18n.t("shortcuts_title"))
-        w.configure(bg=c["bg"])
-        self._center_over_root(w, 580, 560)
         w.transient(self.root)
+        self._center_over_root(w, 580, 560)
 
         box = ttk.Frame(w, padding=18)
         box.pack(fill="both", expand=True)
