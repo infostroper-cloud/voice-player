@@ -856,12 +856,12 @@ ICON_GLYPHS = {
 TTS_RATE    = "+0%"   # нейтрально: скорость регулирует плеер (time-stretch), а не edge-tts
 TTS_TIMEOUT_S = 90    # верхний предел: edge-tts временами отдаёт звук медленно, не убиваем живой рендер
                       # (реальные обрывы дочерний процесс ловит сам через connect/receive_timeout ~18с)
-TTS_RETRIES   = 1
+TTS_RETRIES   = 3
 TTS_FIRST_PART_CHARS = 220   # первая часть (~8–12 с звука): быстрый старт + запас времени для рендера 2-й части
 TTS_SECOND_PART_CHARS = 380  # вторая часть: плавный разгон буфера без паузы после 1-й части
 TTS_PART_CHARS = 600         # остальные части: каждая быстро рендерится без сетевого троттлинга
 TTS_PARALLEL_PARTS = 2       # 2 потока: 1-я и 2-я части идут параллельно без таймаутов от Microsoft
-TTS_RETRY_DELAY_S = 2.0
+TTS_RETRY_DELAY_S = 0.8
 TTS_AUTO_RETRY     = 3      # авто-повтор упавших по таймауту реплик (самолечение при сбое сети)
 TTS_AUTO_RETRY_BASE_S = 20 # задержка авто-повтора нарастает: 20с, 40с, 60с (предохранитель от шторма)
 POLL_BOARD_INTERVAL_S = 2.5
@@ -1607,11 +1607,33 @@ def _audio_duration(path: "Path", fallback: float) -> float:
         return fallback
 
 
+def _find_local_fallback_voice(text: str = "") -> str:
+    """Найти реально установленную на диске модель Piper для офлайн-фолбэка."""
+    if not _PIPER_OK or not vp_piper.VOICES_DIR.is_dir():
+        return ""
+    if vp_piper.is_local(TTS_VOICE):
+        m = vp_piper.VOICES_DIR / (TTS_VOICE.removeprefix(vp_piper.VOICE_PREFIX) + ".onnx")
+        if m.is_file() and m.with_suffix(".onnx.json").is_file():
+            return TTS_VOICE
+    installed = sorted(
+        p.stem for p in vp_piper.VOICES_DIR.glob("*.onnx")
+        if p.with_suffix(".onnx.json").is_file()
+    )
+    if not installed:
+        return ""
+    has_cyr = any("а" <= ch.lower() <= "я" or ch.lower() == "ё" for ch in (text or ""))
+    pref_pfx = ("ru_",) if has_cyr else ("en_", "ru_")
+    for pfx in pref_pfx:
+        for stem in installed:
+            if stem.startswith(pfx):
+                return vp_piper.VOICE_PREFIX + stem
+    return vp_piper.VOICE_PREFIX + installed[0]
+
+
 def _has_local_fallback_voice(voice: str) -> bool:
-    if vp_piper.is_local(voice) or not vp_piper.is_local(TTS_VOICE):
+    if vp_piper.is_local(voice):
         return False
-    model = vp_piper.VOICES_DIR / (TTS_VOICE.removeprefix(vp_piper.VOICE_PREFIX) + ".onnx")
-    return model.is_file() and model.with_suffix(".onnx.json").is_file()
+    return bool(_find_local_fallback_voice())
 
 
 def generate_supporter_key(seed: str = "") -> str:
@@ -1639,7 +1661,7 @@ def verify_supporter_key(key: str) -> bool:
 def _synthesize_with_retries(text: str, rate: str, mp3_file: "Path", voice: str, item_id: str) -> tuple:
     """Одна часть: (sents, words), либо RuntimeError после всех попыток."""
     last_err = "render failed"
-    max_retries = 0 if _has_local_fallback_voice(voice) else TTS_RETRIES
+    max_retries = 0 if vp_piper.is_local(voice) else TTS_RETRIES
     for attempt in range(1, max_retries + 2):
         try:
             sents, words = _synthesize(text, rate, mp3_file, voice)
@@ -1652,7 +1674,7 @@ def _synthesize_with_retries(text: str, rate: str, mp3_file: "Path", voice: str,
             last_err = f"{type(e).__name__}: {e}"[:300]
         log_line(f"render FAIL [{item_id}] {mp3_file.stem} attempt={attempt}/{max_retries+1}: {last_err}")
         if attempt <= max_retries:
-            time.sleep(TTS_RETRY_DELAY_S)
+            time.sleep(min(TTS_RETRY_DELAY_S * attempt, 3.0))
     try:
         if mp3_file.exists() and mp3_file.stat().st_size == 0:
             mp3_file.unlink()
@@ -1750,26 +1772,36 @@ def render_audio_blocking(item: Item, rate: str = TTS_RATE, voice: str = TTS_VOI
             if on_part is None or not item.parts_done:
                 item.audio_ready = False
     if item.audio_error:
-        # Wait for the outstanding Edge workers before reusing their output paths.
-        # Keep already published parts on their original voice.
-        fallback_voice = TTS_VOICE
-        if not item.parts_done and not vp_piper.is_local(voice) and vp_piper.is_local(fallback_voice):
-            model = vp_piper.VOICES_DIR / (fallback_voice.removeprefix(vp_piper.VOICE_PREFIX) + ".onnx")
-            if model.is_file() and model.with_suffix(".onnx.json").is_file():
-                log_line(f"render fallback [{item.id}]: {voice} -> {fallback_voice}")
-                render_audio_blocking(item, rate, fallback_voice, lead, on_part)
+        # Если облачный TTS полностью упал до выдачи первой части — переключаемся на установленный локальный Piper.
+        fallback_voice = _find_local_fallback_voice(body)
+        if not item.parts_done and not vp_piper.is_local(voice) and fallback_voice:
+            log_line(f"render fallback [{item.id}]: {voice} -> {fallback_voice}")
+            item.audio_error = None
+            render_audio_blocking(item, rate, fallback_voice, lead, on_part)
         return
     if len(spans) > 1:                               # склеить в один файл: перемотка, сохранение, запуск заново
         try:
             tmp = mp3_file.with_suffix(".tmp")
-            with open(tmp, "wb") as out:
-                for p in item.parts_done:
-                    out.write(Path(p).read_bytes())
+            is_wav = vp_piper.is_local(voice) and Path(item.parts_done[0]).read_bytes()[:4] == b"RIFF"
+            if is_wav:
+                import wave
+                with wave.open(str(tmp), "wb") as w_out:
+                    params_set = False
+                    for p in item.parts_done:
+                        with wave.open(str(p), "rb") as w_in:
+                            if not params_set:
+                                w_out.setparams(w_in.getparams())
+                                params_set = True
+                            w_out.writeframes(w_in.readframes(w_in.getnframes()))
+            else:
+                with open(tmp, "wb") as out:
+                    for p in item.parts_done:
+                        out.write(Path(p).read_bytes())
             tmp.replace(mp3_file)
             item.audio_path = mp3_file
             if on_part is None:
                 _cleanup_rendered_parts(item, mp3_file)
-        except OSError as e:
+        except Exception as e:
             log_line(f"render concat [{item.id}]: {e}")
     else:
         item.audio_path = mp3_file
