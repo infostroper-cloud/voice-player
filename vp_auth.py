@@ -142,7 +142,7 @@ def sync_lead_to_server(profile: dict, app_version: str = "") -> bool:
     if LEAD_WEBHOOK_KEY:
         headers["apikey"] = LEAD_WEBHOOK_KEY
         headers["Authorization"] = f"Bearer {LEAD_WEBHOOK_KEY}"
-        headers["Prefer"] = "resolution=merge-duplicates"
+        headers["Prefer"] = "resolution=ignore-duplicates"
     try:
         req = urllib.request.Request(
             LEAD_WEBHOOK_URL,
