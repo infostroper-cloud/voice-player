@@ -1672,6 +1672,11 @@ def _synthesize_with_retries(text: str, rate: str, mp3_file: "Path", voice: str,
             last_err = "озвучка вернула пустой файл"
         except Exception as e:
             last_err = f"{type(e).__name__}: {e}"[:300]
+            try:
+                if mp3_file.exists() and mp3_file.stat().st_size == 0:
+                    mp3_file.unlink()
+            except OSError:
+                pass
         log_line(f"render FAIL [{item_id}] {mp3_file.stem} attempt={attempt}/{max_retries+1}: {last_err}")
         if attempt <= max_retries:
             time.sleep(min(TTS_RETRY_DELAY_S * attempt, 3.0))
@@ -1772,35 +1777,39 @@ def render_audio_blocking(item: Item, rate: str = TTS_RATE, voice: str = TTS_VOI
             if on_part is None or not item.parts_done:
                 item.audio_ready = False
     if item.audio_error:
-        # Если облачный TTS полностью упал до выдачи первой части — переключаемся на установленный локальный Piper.
+        # Если облачный TTS упал (даже посреди многочастной реплики) — дорендериваем установленным локальным Piper.
         fallback_voice = _find_local_fallback_voice(body)
-        if not item.parts_done and not vp_piper.is_local(voice) and fallback_voice:
-            log_line(f"render fallback [{item.id}]: {voice} -> {fallback_voice}")
+        if not vp_piper.is_local(voice) and fallback_voice:
+            log_line(f"render fallback [{item.id}]: {voice} -> {fallback_voice} (from part {len(item.parts_done)})")
             item.audio_error = None
+            item.rendered_voice = fallback_voice
             render_audio_blocking(item, rate, fallback_voice, lead, on_part)
         return
     if len(spans) > 1:                               # склеить в один файл: перемотка, сохранение, запуск заново
         try:
-            tmp = mp3_file.with_suffix(".tmp")
-            is_wav = vp_piper.is_local(voice) and Path(item.parts_done[0]).read_bytes()[:4] == b"RIFF"
-            if is_wav:
-                import wave
-                with wave.open(str(tmp), "wb") as w_out:
-                    params_set = False
-                    for p in item.parts_done:
-                        with wave.open(str(p), "rb") as w_in:
-                            if not params_set:
-                                w_out.setparams(w_in.getparams())
-                                params_set = True
-                            w_out.writeframes(w_in.readframes(w_in.getnframes()))
-            else:
-                with open(tmp, "wb") as out:
-                    for p in item.parts_done:
-                        out.write(Path(p).read_bytes())
-            tmp.replace(mp3_file)
-            item.audio_path = mp3_file
-            if on_part is None:
-                _cleanup_rendered_parts(item, mp3_file)
+            headers = [Path(p).read_bytes()[:4] == b"RIFF" for p in item.parts_done]
+            is_wav = all(headers)
+            is_mixed = any(headers) and not is_wav
+            if not is_mixed:
+                tmp = mp3_file.with_suffix(".tmp")
+                if is_wav:
+                    import wave
+                    with wave.open(str(tmp), "wb") as w_out:
+                        params_set = False
+                        for p in item.parts_done:
+                            with wave.open(str(p), "rb") as w_in:
+                                if not params_set:
+                                    w_out.setparams(w_in.getparams())
+                                    params_set = True
+                                w_out.writeframes(w_in.readframes(w_in.getnframes()))
+                else:
+                    with open(tmp, "wb") as out:
+                        for p in item.parts_done:
+                            out.write(Path(p).read_bytes())
+                tmp.replace(mp3_file)
+                item.audio_path = mp3_file
+                if on_part is None:
+                    _cleanup_rendered_parts(item, mp3_file)
         except Exception as e:
             log_line(f"render concat [{item.id}]: {e}")
     else:
