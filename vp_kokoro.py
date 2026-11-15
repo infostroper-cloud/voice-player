@@ -8,6 +8,7 @@ import json
 import os
 import re
 import threading
+from functools import lru_cache
 from pathlib import Path
 
 import vp_piper
@@ -91,6 +92,7 @@ class _KokoroRuG2P:
 
         tok_data = json.loads((base_dir / "tokenizer.json").read_text(encoding="utf-8"))
         self._vocab = tok_data["model"]["vocab"]
+        self._cached_ids = lru_cache(maxsize=2048)(self._text_to_ids_uncached)
 
     def _phonemize_espeak(self, marked: str) -> str:
         from piper import espeakbridge
@@ -102,7 +104,7 @@ class _KokoroRuG2P:
             parts.append(ph + term)
         return " ".join(p.strip() for p in parts if p.strip())
 
-    def text_to_ids(self, text: str) -> list:
+    def _text_to_ids_uncached(self, text: str) -> tuple:
         spoken = vp_piper.speakable(text)
         bracketed = self._mod.RuG2P._brackets(spoken)
         marked = self._mod._plus_to_acute(self._accent.process_all(bracketed))
@@ -112,8 +114,10 @@ class _KokoroRuG2P:
             ps = ps.replace(old, new)
         ps = self._mod.lengthen_sch(self._mod.reduce_vowels(ps))
         ps = re.sub(r"\s+", " ", ps).strip()
-        ids = [self._vocab[c] for c in ps if c in self._vocab]
-        return ids
+        return tuple(self._vocab[c] for c in ps if c in self._vocab)
+
+    def text_to_ids(self, text: str) -> list:
+        return list(self._cached_ids(text))
 
 
 def _get_engine(voice: str):
