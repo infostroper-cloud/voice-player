@@ -484,6 +484,7 @@ import vp_text
 from vp_text import (
     _slash_to_or,
     _PRONOUNCE,
+    DEFAULT_PRONOUNCE,
     _apply_pronounce,
     _ABBREV,
     _UNITS,
@@ -1110,6 +1111,7 @@ class VoicePlayerApp:
                 api_url=self.var_ai_api_url.get() if hasattr(self, "var_ai_api_url") else "",
                 api_key=self.var_ai_api_key.get() if hasattr(self, "var_ai_api_key") else "",
                 api_model=self.var_ai_model.get() if hasattr(self, "var_ai_model") else "",
+                ui_lang=self.var_lang.get() if hasattr(self, "var_lang") else "ru",
             )
         except Exception:
             pass
@@ -2261,8 +2263,8 @@ class VoicePlayerApp:
         self._tt(self.lbl_ai, "Найдены нейросети — нажмите, чтобы подключить авто-озвучку")
         self.lbl_ai.grid_remove()
 
-        # Таблетки фильтров [Все] [Нейросети] [Доска] [★] + [🔄] [🔍] [▾]
-        pills_bar = ttk.Frame(mid)
+        # Таблетки фильтров [Все] [Нейросети] [Доска] [★] + [🔄] [🔍] [▾] (с переносом строки при узкой панели)
+        pills_bar = _wrap_bar(ttk.Frame(mid), pad=4)
         pills_bar.grid(row=2, column=0, sticky="ew", pady=(6, 0))
         self._src_pill_btns = {}
         for src_key, pill_lbl, tip_txt in (
@@ -2277,13 +2279,15 @@ class VoicePlayerApp:
             self._tt(b, tip_txt)
             self._src_pill_btns[src_key] = b
 
-        self._tt(ttk.Button(pills_bar, text="▾", width=2, style="Toggle.TButton",
+        actions_grp = ttk.Frame(pills_bar)
+        actions_grp.pack(side="left", padx=(4, 0))
+        self._icon_button(actions_grp, "refresh", lambda: self._pull_recent_ai(limit_per_source=6),
+                          "Подтянуть свежие диалоги и ответы из Antigravity и Codex").pack(side="left", padx=(0, 3))
+        self._icon_button(actions_grp, "search", self._toggle_search,
+                          "Поиск по очереди (Ctrl+F)").pack(side="left", padx=(0, 3))
+        self._tt(ttk.Button(actions_grp, text="▾", width=2, style="Toggle.TButton",
                             command=self._toggle_extra_filters),
-                 "Фильтр по автору и дате").pack(side="right")
-        self._icon_button(pills_bar, "search", self._toggle_search,
-                          "Поиск по очереди (Ctrl+F)").pack(side="right", padx=(0, 3))
-        self._icon_button(pills_bar, "refresh", lambda: self._pull_recent_ai(limit_per_source=6),
-                          "Подтянуть свежие диалоги и ответы из Antigravity и Codex").pack(side="right", padx=(0, 3))
+                 "Фильтр по автору и дате").pack(side="left")
 
         # Скрываемая панель «Автор + Дата + Поиск» (раскрывается по 🔍 или ▾)
         sub_bars = ttk.Frame(mid)
@@ -3763,14 +3767,19 @@ class VoicePlayerApp:
     def _load_pronounce(self):
         try:
             d = json.loads(PRONOUNCE_FILE.read_text(encoding="utf-8"))
+            if not isinstance(d, dict):
+                d = {}
         except Exception:
-            d = {"ЛМК": "эл-эм-ка", "ОДК": "о-дэ-ка", "ГПР": "гэ-пэ-эр", "КП": "ка-пэ"}
-            _PRONOUNCE.clear()
-            _PRONOUNCE.update(d)
-            self._save_pronounce()
-            return
+            d = {}
+        changed = not PRONOUNCE_FILE.exists()
+        for k, v in DEFAULT_PRONOUNCE.items():
+            if k not in d:
+                d[k] = v
+                changed = True
         _PRONOUNCE.clear()
         _PRONOUNCE.update(d)
+        if changed:
+            self._save_pronounce()
 
     def _save_pronounce(self):
         try:
@@ -3884,7 +3893,9 @@ class VoicePlayerApp:
     # ------------------ плейлисты (именованные очереди) ------------------
     def _open_settings(self, select_tab: str = ""):
         c = self.colors
-        win = tk.Toplevel(self.root, bg=c["bg"]); win.title(vp_i18n.t("settings"))
+        win = tk.Toplevel(self.root, bg=c["bg"])
+        win.withdraw()
+        win.title(vp_i18n.t("settings"))
 
         tab_titles = [
             vp_i18n.t("tab_playback"),
@@ -3898,7 +3909,7 @@ class VoicePlayerApp:
         needed_w = sum(len(t) * 9 + 32 for t in tab_titles) + 60
         win_w = max(940, min(1200, needed_w + 60))
         win_h = 580
-        win.transient(self.root); self._center_over_root(win, win_w, win_h)
+        win.transient(self.root)
         win.minsize(940, 560)
         win.resizable(True, True)
 
@@ -4148,14 +4159,28 @@ class VoicePlayerApp:
         ttk.Button(t4, text="Войти через Google / Аккаунт",
                    command=lambda: self._open_account_dialog(first_run=False)).grid(row=11, column=1, sticky="w")
 
-        # — Нейросети —
+        # — Нейросети — (строим лениво, чтобы Настройки открывались мгновенно)
         t5 = tab(vp_i18n.t("tab_ai_tab"))
         t5.columnconfigure(1, weight=1)
-        self._build_ai_tab(t5)
+        ai_built = {"done": False}
+
+        def _ensure_ai_tab(_e=None):
+            if ai_built["done"]:
+                return
+            try:
+                if nb.select() != str(t5):
+                    return
+            except Exception:
+                return
+            ai_built["done"] = True
+            self._build_ai_tab(t5)
+
+        nb.bind("<<NotebookTabChanged>>", _ensure_ai_tab)
         t6 = tab(vp_i18n.t("tab_updates"))
         self._build_update_tab(t6)
         if select_tab in ("Нейросети", "ai", vp_i18n.t("tab_ai_tab")):
             nb.select(t5)
+            win.after(10, _ensure_ai_tab)
         elif select_tab in ("Оформление", "appearance", vp_i18n.t("tab_appearance")):
             nb.select(t3)
         elif select_tab in ("Горячие клавиши", "shortcuts", "hotkeys", vp_i18n.t("tab_shortcuts")):
@@ -4163,6 +4188,9 @@ class VoicePlayerApp:
 
         ttk.Button(win, text=vp_i18n.t("close"), style="Primary.TButton",
                    command=lambda: (self._save_prefs(), win.destroy())).pack(pady=(0, 10))
+        win.update_idletasks()
+        self._center_over_root(win, win_w, win_h)
+        win.deiconify()
 
     def _maybe_prompt_signin(self):
         try:

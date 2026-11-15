@@ -4,9 +4,24 @@ from pathlib import Path
 
 import vp_ai
 import vp_auth
+import vp_text
 
 
 class TestVpAi(unittest.TestCase):
+    def test_detect_response_language(self):
+        code_ru, _ = vp_ai._detect_response_language("Привет! API вернул JSON без ошибок.")
+        self.assertEqual(code_ru, "ru")
+        code_en, _ = vp_ai._detect_response_language("Hello world, this API returns JSON cleanly.")
+        self.assertEqual(code_en, "en")
+
+    def test_default_pronounce_preserves_english_and_helps_russian(self):
+        ru = vp_text._apply_pronounce("Новый API для Python готов", vp_text.DEFAULT_PRONOUNCE)
+        self.assertIn("эй-пи-ай", ru)
+        self.assertIn("Пайтон", ru)
+        en = vp_text._apply_pronounce("The new API for Python is ready", vp_text.DEFAULT_PRONOUNCE)
+        self.assertIn("API", en)
+        self.assertIn("Python", en)
+
     def test_extractive_summary_compresses_long_text(self):
         long_text = (
             "VoicePlayer озвучивает ответы ИИ-агентов и длинные статьи в реальном времени. "

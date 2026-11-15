@@ -27,6 +27,7 @@ API_KEY: str = ""
 API_MODEL: str = ""
 OLLAMA_URL: str = "http://127.0.0.1:11434"
 OLLAMA_MODEL: str = ""
+UI_LANG: str = "ru"
 
 _STOP_WORDS = {
     "что", "как", "это", "для", "или", "при", "так", "уже", "если", "того", "чтобы",
@@ -55,9 +56,10 @@ def configure(
     api_model: Optional[str] = None,
     ollama_url: Optional[str] = None,
     ollama_model: Optional[str] = None,
+    ui_lang: Optional[str] = None,
 ) -> None:
     """Настроить провайдера AI из настроек приложения."""
-    global PROVIDER, API_URL, API_KEY, API_MODEL, OLLAMA_URL, OLLAMA_MODEL
+    global PROVIDER, API_URL, API_KEY, API_MODEL, OLLAMA_URL, OLLAMA_MODEL, UI_LANG
     if provider is not None:
         PROVIDER = (provider or "auto").strip().lower()
     if api_url is not None:
@@ -70,6 +72,8 @@ def configure(
         OLLAMA_URL = (ollama_url or "http://127.0.0.1:11434").strip().rstrip("/")
     if ollama_model is not None:
         OLLAMA_MODEL = ollama_model.strip()
+    if ui_lang is not None:
+        UI_LANG = (ui_lang or "ru").strip().lower()
 
 
 def _read_secrets_env() -> dict[str, str]:
@@ -120,13 +124,17 @@ def _resolve_api_config() -> tuple[str, str, str]:
     return "", "", ""
 
 
-def _call_openai_compat(prompt: str, max_tokens: int = 450) -> str:
+def _call_openai_compat(prompt: str, max_tokens: int = 450, system_msg: str = "") -> str:
     url, key, model = _resolve_api_config()
     if not url or not key:
         return ""
+    msgs = []
+    if system_msg:
+        msgs.append({"role": "system", "content": system_msg})
+    msgs.append({"role": "user", "content": prompt})
     payload = {
         "model": model,
-        "messages": [{"role": "user", "content": prompt}],
+        "messages": msgs,
         "temperature": 0.3,
         "max_tokens": max_tokens,
     }
@@ -165,9 +173,12 @@ def _call_ollama(prompt: str) -> str:
             # Предпочитаем лёгкие текстовые модели (не embed)
             non_embed = [m for m in models if "embed" not in m.lower()]
             model = (non_embed or models)[0]
+        body = {"model": model, "prompt": prompt, "stream": False}
+        if getattr(_call_ollama, "_system_msg", ""):
+            body["system"] = _call_ollama._system_msg
         req = urllib.request.Request(
             f"{base}/api/generate",
-            data=json.dumps({"model": model, "prompt": prompt, "stream": False}).encode("utf-8"),
+            data=json.dumps(body).encode("utf-8"),
             headers={"Content-Type": "application/json"},
             method="POST",
         )
@@ -249,7 +260,36 @@ def _extractive_summary(text: str, n: int = 4) -> str:
     return result or cleaned[:700]
 
 
-def _run_llm(prompt: str, max_tokens: int = 450) -> tuple[str, str]:
+_LANG_NAMES = {
+    "ru": "Russian (русский язык)",
+    "en": "English",
+    "de": "German (Deutsch)",
+    "fr": "French (français)",
+    "es": "Spanish (español)",
+    "zh": "Chinese (中文)",
+    "ja": "Japanese (日本語)",
+    "hi": "Hindi (हिन्दी)",
+}
+
+
+def _detect_response_language(text: str) -> tuple[str, str]:
+    """Определить язык исходного текста для ответа (если смешанный/код — язык текста с кириллицей -> ru)."""
+    s = (text or "").strip()
+    cyr = sum(1 for ch in s if "а" <= ch.lower() <= "я" or ch.lower() == "ё")
+    if cyr >= 5:
+        return "ru", _LANG_NAMES["ru"]
+    try:
+        import vp_i18n
+        code = vp_i18n.detect_text_language(s)
+        if code in _LANG_NAMES:
+            return code, _LANG_NAMES[code]
+    except Exception:
+        pass
+    code = UI_LANG if UI_LANG in _LANG_NAMES else "ru"
+    return code, _LANG_NAMES[code]
+
+
+def _run_llm(prompt: str, max_tokens: int = 450, system_msg: str = "") -> tuple[str, str]:
     """Выполнить LLM-запрос согласно PROVIDER. Возвращает (text, source_tag)."""
     mode = (PROVIDER or "auto").lower()
     order = (
@@ -261,31 +301,48 @@ def _run_llm(prompt: str, max_tokens: int = 450) -> tuple[str, str]:
     )
     for step in order:
         if step == "api":
-            out = _call_openai_compat(prompt, max_tokens=max_tokens)
+            out = _call_openai_compat(prompt, max_tokens=max_tokens, system_msg=system_msg)
             if out:
                 return out, "api"
         elif step == "ollama":
+            _call_ollama._system_msg = system_msg
             out = _call_ollama(prompt)
+            _call_ollama._system_msg = ""
             if out:
                 return out, "ollama"
         elif step == "cli":
-            out = _call_cli(prompt)
+            full_p = f"{system_msg}\n\n{prompt}".strip() if system_msg else prompt
+            out = _call_cli(full_p)
             if out:
                 return out, "cli"
     return "", "offline"
 
 
 def ai_summary(text: str) -> str:
-    """Краткий пересказ: API -> Ollama -> CLI -> улучшенный локальный экстрактивный."""
+    """Краткий пересказ на языке исходного текста: API -> Ollama -> CLI -> локальный экстрактивный."""
     src = (text or "").strip()
     if not src:
         return ""
     if len(src) > 100 and (PROVIDER or "auto").lower() != "offline":
-        prompt = (
-            "Перескажи кратко и по-русски (3–5 предложений или коротких пунктов), "
-            "только ключевая суть, без вводных фраз:\n\n" + src[:8000]
+        lang_code, lang_name = _detect_response_language(src)
+        sys_msg = (
+            f"You MUST reply strictly in {lang_name}. Never switch or translate to another language. "
+            f"Write concise 3-5 bullet points or sentences with only key facts, no intro."
         )
-        out, _ = _run_llm(prompt, max_tokens=450)
+        prompt = (
+            f"Summarize the following text strictly in {lang_name} (3-5 short sentences or bullets, "
+            f"only the essence, no intro):\n\n{src[:8000]}"
+        )
+        if lang_code == "ru":
+            sys_msg = (
+                "Отвечай СТРОГО на русском языке. Не переходи на английский язык. "
+                "Дай краткую выжимку в 3–5 предложений или пунктов без вводных слов."
+            )
+            prompt = (
+                "Перескажи кратко и СТРОГО на русском языке (3–5 предложений или коротких пунктов, "
+                "только ключевая суть, без вступлений):\n\n" + src[:8000]
+            )
+        out, _ = _run_llm(prompt, max_tokens=450, system_msg=sys_msg)
         if out:
             return out
     return _extractive_summary(src, 4)
