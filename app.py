@@ -609,85 +609,20 @@ from vp_stt import (
 vp_stt.set_logger(log_line)
 
 
-# ============================ AI-САММАРИ + СУЩНОСТИ ============================
+# ============================ AI-САММАРИ + СУЩНОСТИ (vp_ai) ============================
 
-def _extractive_summary(text: str, n: int = 3) -> str:
-    import re
-    sents = [s.strip() for s in re.split(r"(?<=[.!?])\s+", text) if len(s.strip()) > 20]
-    if len(sents) <= n:
-        return text.strip()
-    words = [w for w in re.findall(r"\w+", text.lower()) if len(w) > 3]
-    freq = {}
-    for w in words:
-        freq[w] = freq.get(w, 0) + 1
-    scored = sorted(sents, key=lambda s: sum(freq.get(w, 0) for w in re.findall(r"\w+", s.lower())),
-                    reverse=True)[:n]
-    return " ".join(s for s in sents if s in scored)
+import vp_ai
+from vp_ai import (
+    _extractive_summary,
+    ai_summary,
+    extract_entities,
+    tag_for,
+    ai_reply,
+)
+vp_ai.set_logger(log_line)
 
-
-def ai_summary(text: str) -> str:
-    """Краткий пересказ: реальный Claude CLI (без ключа), иначе локальный экстрактивный."""
-    import shutil, subprocess
-    claude = shutil.which("claude")
-    if claude and len(text) > 120:
-        prompt = ("Перескажи кратко и по-русски, 3–5 предложений, только суть, без вступлений:\n\n"
-                  + text[:8000])
-        try:
-            r = subprocess.run([claude, "-p", prompt], capture_output=True, text=True,
-                               timeout=120, creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
-            out = (r.stdout or "").strip()
-            if out:
-                return out
-        except Exception as e:
-            log_line(f"claude summary failed: {e}")
-    return _extractive_summary(text, 3)
-
-
-def extract_entities(text: str):
-    """Найти задачи/даты/время/числа/имена для подсветки. Возвращает list[(start,end)]."""
-    import re
-    spans = []
-    pats = [
-        r"\b\d{1,2}[:.]\d{2}\b",                       # время
-        r"\b\d{1,2}[./]\d{1,2}(?:[./]\d{2,4})?\b",     # дата
-        r"\b\d[\d\s.,]*\b",                            # числа
-        r"\b(?:нужно|надо|сделать|дедлайн|срочно|задача|до завтра|сегодня|завтра)\b",
-        r"\b[А-ЯЁ][а-яё]{2,}\b",                       # слова с заглавной (имена)
-    ]
-    for p in pats:
-        for m in re.finditer(p, text, flags=re.IGNORECASE):
-            spans.append((m.start(), m.end()))
-    return spans
-
-
-def tag_for(text: str) -> str:
-    """Авто-тег реплики по содержимому: 🔴 срочное, ✅ задача, ❓ вопрос."""
-    import re
-    t = (text or "").lower()
-    if re.search(r"\b(срочно|asap|немедленно|критично|блокер)\b", t):
-        return "🔴"
-    if re.search(r"\b(нужно|надо|сделать|задача|дедлайн|подготовь|пришли|закрой)\b", t):
-        return "✅"
-    if "?" in text:
-        return "❓"
-    return ""
-
-
-def ai_reply(text: str) -> str:
-    """Черновик делового ответа на сообщение через Claude CLI (без ключа)."""
-    import shutil, subprocess
-    claude = shutil.which("claude")
-    if not claude:
-        return ""
-    prompt = ("Напиши короткий деловой ответ по-русски на это сообщение, "
-              "только текст ответа без вступлений:\n\n" + text[:6000])
-    try:
-        r = subprocess.run([claude, "-p", prompt], capture_output=True, text=True,
-                           timeout=120, creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
-        return (r.stdout or "").strip()
-    except Exception as e:
-        log_line(f"ai_reply failed: {e}")
-        return ""
+import vp_auth
+vp_auth.set_logger(log_line)
 
 
 # ============================ ДОСКА, HTTP И TELEGRAM (vp_board) ============================
@@ -877,6 +812,11 @@ class VoicePlayerApp:
         }   # поток/автор → id голоса (отсев удалённых и ручных псевдо-авторов)
         self._author_names = dict(self.prefs.get("author_names", {}))      # автор → отображаемое имя (псевдоним)
         self.var_tg_chat = tk.StringVar(value=self.prefs.get("tg_chat_id", ""))
+        self.var_ai_provider = tk.StringVar(value=self.prefs.get("ai_provider", "auto"))
+        self.var_ai_api_url = tk.StringVar(value=self.prefs.get("ai_api_url", ""))
+        self.var_ai_api_key = tk.StringVar(value=self.prefs.get("ai_api_key", ""))
+        self.var_ai_model = tk.StringVar(value=self.prefs.get("ai_model", ""))
+        self._apply_ai_config()
         self._voicecmd = False               # режим голосовых команд
         self._vc_stream = None
         self._vc_frames = []
@@ -996,6 +936,7 @@ class VoicePlayerApp:
         threading.Thread(target=self._watcher_poll_loop, daemon=True, name="ai-watchers").start()
         self.root.after(200, self._tick)
         self.root.after(300, self._restore_sashes)   # вернуть размеры секций
+        self.root.after(1500, self._maybe_prompt_signin)
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
 
     # ------------------ закреплённые + избранные (сохраняются между запусками) ------------------
@@ -1162,7 +1103,19 @@ class VoicePlayerApp:
         try: return json.loads(PREFS_FILE.read_text(encoding="utf-8"))
         except Exception: return {}
 
+    def _apply_ai_config(self):
+        try:
+            vp_ai.configure(
+                provider=self.var_ai_provider.get() if hasattr(self, "var_ai_provider") else "auto",
+                api_url=self.var_ai_api_url.get() if hasattr(self, "var_ai_api_url") else "",
+                api_key=self.var_ai_api_key.get() if hasattr(self, "var_ai_api_key") else "",
+                api_model=self.var_ai_model.get() if hasattr(self, "var_ai_model") else "",
+            )
+        except Exception:
+            pass
+
     def _save_prefs(self):
+        self._apply_ai_config()
         try:
             geom = self.root.geometry() if hasattr(self, "root") else ""
             # свёрнутое в трей/мини-плеер окно отдаёт 1x1 — не затираем им нормальный размер
@@ -1218,6 +1171,10 @@ class VoicePlayerApp:
                 "author_voices": getattr(self, "_author_voices", {}),
                 "author_names": getattr(self, "_author_names", {}),
                 "tg_chat_id": self.var_tg_chat.get() if hasattr(self, "var_tg_chat") else "",
+                "ai_provider": self.var_ai_provider.get() if hasattr(self, "var_ai_provider") else "auto",
+                "ai_api_url": self.var_ai_api_url.get() if hasattr(self, "var_ai_api_url") else "",
+                "ai_api_key": self.var_ai_api_key.get() if hasattr(self, "var_ai_api_key") else "",
+                "ai_model": self.var_ai_model.get() if hasattr(self, "var_ai_model") else "",
                 "watch": sorted(getattr(self, "_watch", set())),
                 "resume": self._resume_snapshot(),
                 "geometry": geom,
@@ -3247,7 +3204,7 @@ class VoicePlayerApp:
         self._set_status("готовлю черновик ответа…", ok=True)
 
         def worker():
-            r = ai_reply(text) or "(Claude недоступен)"
+            r = ai_reply(text) or "(Нет доступного AI-провайдера: проверь Ollama, API-ключ или CLI в Настройках)"
             def put():
                 self._show_text_panel() if False else None
                 self.tts_input.delete("1.0", "end"); self.tts_input.insert("1.0", r)
@@ -4170,6 +4127,26 @@ class VoicePlayerApp:
             row=2, column=0, columnspan=2, sticky="w", pady=(6, 0))
         ttk.Button(t4, text=vp_i18n.t("diag_btn"), command=self._diagnostics).grid(
             row=3, column=0, columnspan=2, sticky="w", pady=(6, 0))
+        ttk.Separator(t4, orient="horizontal").grid(row=4, column=0, columnspan=2, sticky="ew", pady=(12, 8))
+        ttk.Label(t4, text="AI-саммари и ответы:", style="TLabel").grid(row=5, column=0, sticky="w")
+        cmb_ai = ttk.Combobox(t4, textvariable=self.var_ai_provider, state="readonly",
+                              values=["auto", "api", "ollama", "cli", "offline"], width=14)
+        cmb_ai.grid(row=5, column=1, sticky="w")
+        cmb_ai.bind("<<ComboboxSelected>>", lambda e: self._save_prefs())
+        ttk.Label(t4, text="API URL (необяз.):").grid(row=6, column=0, sticky="w", pady=(6, 0))
+        ttk.Entry(t4, textvariable=self.var_ai_api_url).grid(row=6, column=1, sticky="ew", pady=(6, 0))
+        ttk.Label(t4, text="Модель (необяз.):").grid(row=7, column=0, sticky="w", pady=(6, 0))
+        ttk.Entry(t4, textvariable=self.var_ai_model).grid(row=7, column=1, sticky="ew", pady=(6, 0))
+        ttk.Label(t4, text="API-ключ:").grid(row=8, column=0, sticky="w", pady=(6, 0))
+        ttk.Entry(t4, textvariable=self.var_ai_api_key, show="*").grid(row=8, column=1, sticky="ew", pady=(6, 0))
+        ttk.Label(t4, text="auto: API (OpenAI/DeepSeek/Gemini) → Ollama → CLI → офлайн",
+                  style="Dim.TLabel").grid(row=9, column=0, columnspan=2, sticky="w", pady=(6, 0))
+        ttk.Separator(t4, orient="horizontal").grid(row=10, column=0, columnspan=2, sticky="ew", pady=(12, 8))
+        acc = vp_auth.load_account()
+        acc_txt = acc.get("email") or "Не выполнен"
+        ttk.Label(t4, text=f"Аккаунт: {acc_txt}", style="TLabel").grid(row=11, column=0, sticky="w")
+        ttk.Button(t4, text="Войти через Google / Аккаунт",
+                   command=lambda: self._open_account_dialog(first_run=False)).grid(row=11, column=1, sticky="w")
 
         # — Нейросети —
         t5 = tab(vp_i18n.t("tab_ai_tab"))
@@ -4186,6 +4163,108 @@ class VoicePlayerApp:
 
         ttk.Button(win, text=vp_i18n.t("close"), style="Primary.TButton",
                    command=lambda: (self._save_prefs(), win.destroy())).pack(pady=(0, 10))
+
+    def _maybe_prompt_signin(self):
+        try:
+            if not getattr(self, "root", None) or not self.root.winfo_exists():
+                return
+            if vp_auth.should_prompt_onboarding():
+                self._open_account_dialog(first_run=True)
+        except Exception:
+            pass
+
+    def _open_account_dialog(self, first_run: bool = False):
+        c = self.colors
+        win = tk.Toplevel(self.root, bg=c["bg"])
+        win.title("Аккаунт VoicePlayer")
+        win.transient(self.root)
+        self._center_over_root(win, 430, 310)
+        win.grab_set()
+
+        acc = vp_auth.load_account()
+        ttk.Label(
+            win,
+            text="Добро пожаловать в VoicePlayer!" if first_run else "Ваш аккаунт VoicePlayer",
+            style="Title.TLabel",
+        ).pack(anchor="w", padx=16, pady=(16, 4))
+        sub_txt = (
+            f"Вы вошли как: {acc.get('name') or ''} ({acc.get('email')})"
+            if acc.get("email")
+            else "Войдите через Google или укажите email для синхронизации и важных обновлений."
+        )
+        lbl_status = ttk.Label(win, text=sub_txt, style="Dim.TLabel", wraplength=390)
+        lbl_status.pack(anchor="w", padx=16, pady=(0, 12))
+
+        var_opt_in = tk.BooleanVar(value=bool(acc.get("marketing_opt_in", True)))
+        ttk.Checkbutton(
+            win,
+            text="Получать обновления, советы и полезные материалы",
+            variable=var_opt_in,
+        ).pack(anchor="w", padx=16, pady=(0, 10))
+
+        frm_email = ttk.Frame(win)
+        frm_email.pack(fill="x", padx=16, pady=(0, 10))
+        frm_email.columnconfigure(1, weight=1)
+        ttk.Label(frm_email, text="Email:").grid(row=0, column=0, sticky="w", padx=(0, 8))
+        var_email = tk.StringVar(value=acc.get("email", ""))
+        ttk.Entry(frm_email, textvariable=var_email).grid(row=0, column=1, sticky="ew")
+        ttk.Label(frm_email, text="Имя:").grid(row=1, column=0, sticky="w", padx=(0, 8), pady=(6, 0))
+        var_name = tk.StringVar(value=acc.get("name", ""))
+        ttk.Entry(frm_email, textvariable=var_name).grid(row=1, column=1, sticky="ew", pady=(6, 0))
+
+        btns = ttk.Frame(win)
+        btns.pack(fill="x", padx=16, pady=(8, 12))
+
+        def do_google():
+            if not vp_auth.GOOGLE_CLIENT_ID:
+                messagebox.showinfo(
+                    APP_NAME,
+                    "Google Client ID пока не задан в сборке.\nВведите Email и Имя выше и нажмите «Сохранить email».",
+                    parent=win,
+                )
+                return
+            lbl_status.config(text="Открыт браузер для входа через Google…")
+
+            def on_done(ok, err, profile):
+                def ui():
+                    if not win.winfo_exists():
+                        return
+                    if ok:
+                        self._set_status(f"вход выполнен: {profile.get('email', '')}", ok=True)
+                        win.destroy()
+                    else:
+                        lbl_status.config(text=f"Ошибка Google OAuth: {err}")
+
+                self.root.after(0, ui)
+
+            vp_auth.start_google_oauth(
+                marketing_opt_in=var_opt_in.get(),
+                app_version=APP_VERSION,
+                on_done=on_done,
+            )
+
+        def do_email():
+            em = var_email.get().strip()
+            if "@" not in em or "." not in em:
+                messagebox.showwarning(APP_NAME, "Введите корректный email.", parent=win)
+                return
+            vp_auth.register_email_profile(
+                em,
+                var_name.get().strip(),
+                marketing_opt_in=var_opt_in.get(),
+                app_version=APP_VERSION,
+            )
+            self._set_status(f"аккаунт сохранён: {em}", ok=True)
+            win.destroy()
+
+        def do_skip():
+            if first_run:
+                vp_auth.mark_skipped()
+            win.destroy()
+
+        ttk.Button(btns, text="Войти через Google", style="Primary.TButton", command=do_google).pack(side="left")
+        ttk.Button(btns, text="Сохранить email", command=do_email).pack(side="left", padx=(8, 0))
+        ttk.Button(btns, text="Позже" if first_run else "Закрыть", command=do_skip).pack(side="right")
 
     def _save_playlist(self):
         items = [it for it in self._visible() if it.text and not it.text.startswith("(")]
