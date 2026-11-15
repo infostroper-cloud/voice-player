@@ -6779,24 +6779,32 @@ class VoicePlayerApp:
                     if title and not prev.title:
                         prev.title = title
                     return None
+            for prev in reversed(self.queue_items[-25:]):
                 # Если реплика от того же источника с тем же запросом (обновление ответа или финал многошагового хода)
                 if not prev.deleted and prev.source == source and prompt and prev.prompt == prompt:
                     prev_text = prev.raw_text.strip()
                     if norm_raw != prev_text:
-                        # Если предыдущая реплика ещё не проиграна — обновляем её текст на более свежий
-                        if not prev.played:
+                        is_cur_active = (
+                            (0 <= self.current_idx < len(self.queue_items) and self.queue_items[self.current_idx] is prev)
+                            or (self._loaded_item is prev)
+                            or (getattr(self, "_rendering_item_id", None) == prev.id)
+                            or prev.audio_ready
+                            or bool(prev.parts_done)
+                        )
+                        # Если предыдущая реплика ещё не проиграна и не начала озвучиваться/играться — обновляем на месте и ставим в рендер
+                        if not prev.played and not is_cur_active:
                             prev.raw_text = text
                             prev.text = clean
+                            if time_str:
+                                prev.time_str = time_str
                             if title and not prev.title:
                                 prev.title = title
                             self._reset_render_state(prev)
-                            if 0 <= self.current_idx < len(self.queue_items) and self.queue_items[self.current_idx] is prev:
-                                try: self.player.stop()
-                                except Exception: pass
-                                self.root.after(50, lambda p=prev: self._play_index(self.queue_items.index(p)) if p in self.queue_items else None)
+                            self._q_put(prev, 10)
                             self._save_session()
                             self.root.after(0, self._request_render)
                             return prev
+                        break
         item = Item(id=str(uuid4()), source=source, author=author, time_str=time_str,
                     text=clean, raw_text=text, date_str=date_str or time.strftime("%d.%m.%Y"),
                     prompt=prompt, title=title)
@@ -7143,6 +7151,15 @@ class VoicePlayerApp:
         item.parts_done = []; item.parts_fed = 0; item.more_parts = False
         item.rendered_voice = ""
         item.render_attempts = 0                      # ручной повтор → свежий бюджет авто-повторов
+        try:
+            full_p = AUDIO_DIR / f"{item.id}.mp3"
+            if full_p.exists():
+                full_p.unlink()
+            for pp in AUDIO_DIR.glob(f"{item.id}.p*.mp3"):
+                try: pp.unlink()
+                except OSError: pass
+        except OSError:
+            pass
 
     def _maybe_auto_retry(self, item: Item) -> bool:
         """Самолечение: упавшую по транзиентной ошибке (таймаут/сеть) реплику переставить

@@ -440,9 +440,9 @@ class AntigravityWatcher:
                 is_stale = (now - st.st_mtime) > 60
                 files[path] = rec = {
                     "off": st.st_size if (first_run or is_stale) else 0,
-                    "user": False,
-                    "q": "",
+                    "q": self._last_user_prompt(path),
                     "title": title,
+                    "seen_steps": [],
                 }
                 if first_run or is_stale:
                     continue
@@ -468,12 +468,14 @@ class AntigravityWatcher:
                     title = self._peek_title(path)
                     files[path] = {
                         "off": st.st_size,
-                        "user": False,
-                        "q": "",
+                        "q": self._last_user_prompt(path),
                         "title": title,
+                        "seen_steps": [],
                     }
                 else:
                     rec["off"] = st.st_size
+                    if not rec.get("q"):
+                        rec["q"] = self._last_user_prompt(path)
             except OSError:
                 continue
         self.state["init"] = True
@@ -496,6 +498,30 @@ class AntigravityWatcher:
             pass
         return ""
 
+    @staticmethod
+    def _last_user_prompt(path: str) -> str:
+        """Прочитать последний запрос пользователя с конца transcript.jsonl (на случай старта в середине хода)."""
+        try:
+            with open(path, "rb") as f:
+                f.seek(0, os.SEEK_END)
+                size = f.tell()
+                f.seek(max(0, size - 262144))
+                tail = f.read().decode("utf-8", "replace")
+            for line in reversed(tail.splitlines()):
+                if '"USER_INPUT"' not in line or len(line) > AGY_MAX_LINE:
+                    continue
+                try:
+                    step = json.loads(line)
+                except ValueError:
+                    continue
+                if step.get("type") == "USER_INPUT" and step.get("source") in ("USER_EXPLICIT", "USER"):
+                    q = _user_text(step.get("content") or "")
+                    if q:
+                        return q[:300]
+        except Exception:
+            pass
+        return ""
+
     def _read_new(self, path: str, rec: dict, now: float) -> list:
         try:
             with open(path, "rb") as f:
@@ -512,6 +538,7 @@ class AntigravityWatcher:
         conv = parts[-4] if len(parts) >= 4 else ""
         label = self.PRODUCTS.get(product, "Antigravity")
         out = []
+        seen_steps = rec.setdefault("seen_steps", [])
         for raw in chunk[:end].split(b"\n"):
             if not raw.strip() or len(raw) > AGY_MAX_LINE:
                 continue
@@ -522,7 +549,6 @@ class AntigravityWatcher:
             kind = step.get("type")
             if kind == "USER_INPUT":
                 if step.get("source") in ("USER_EXPLICIT", "USER"):
-                    rec["user"] = True
                     q = _user_text(step.get("content") or "")
                     if q:
                         rec["q"] = q[:300]
@@ -536,9 +562,17 @@ class AntigravityWatcher:
                 full_text = _full_step_content(path, step.get("step_index"))
                 if full_text:
                     text = full_text
-            if not text or not rec.get("user"):
+            if not text:
                 continue
-            rec["user"] = False
+            step_idx = step.get("step_index")
+            if step_idx is not None and step_idx in seen_steps:
+                continue
+            if step_idx is not None:
+                seen_steps.append(step_idx)
+                if len(seen_steps) > 200:
+                    del seen_steps[:-200]
+            if not rec.get("q"):
+                rec["q"] = self._last_user_prompt(path)
             when = _iso_ts(step.get("created_at")) or now
             if now - when > CATCHUP_S:
                 continue
@@ -1685,7 +1719,6 @@ class Watchers:
                 conv = parts[-4] if len(parts) >= 4 else ""
                 label = aw.PRODUCTS.get(product, "Antigravity")
                 last_q = ""
-                user_turn = False
                 conv_turns = []
                 with open(path, "rb") as f:
                     for raw in f:
@@ -1698,7 +1731,6 @@ class Watchers:
                         kind = step.get("type")
                         if kind == "USER_INPUT":
                             if step.get("source") in ("USER_EXPLICIT", "USER"):
-                                user_turn = True
                                 q = _user_text(step.get("content") or "")
                                 if q:
                                     last_q = q[:300]
@@ -1708,7 +1740,7 @@ class Watchers:
                                 full_text = _full_step_content(path, step.get("step_index"))
                                 if full_text:
                                     text = full_text
-                            if text and user_turn:
+                            if text:
                                 when = _iso_ts(step.get("created_at")) or now
                                 t_disp = title or _short(last_q or conv[:8])
                                 conv_turns.append((when, {
@@ -1722,7 +1754,6 @@ class Watchers:
                                     "text": text,
                                     "key": f"agy:{conv}:{step.get('step_index')}",
                                 }))
-                                user_turn = False
                 agy_turns.extend(conv_turns[-3:])
             except Exception as e:
                 self.log(f"fetch_recent agy: {e}")

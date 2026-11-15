@@ -123,25 +123,67 @@ class CodexAndAntigravityWatchers(unittest.TestCase):
             {"step_index": 1, "type": "PLANNER_RESPONSE", "source": "MODEL", "created_at": iso,
              "content": "Ищу файлы…", "tool_calls": [{"name": "run_command"}]},
             {"step_index": 2, "type": "PLANNER_RESPONSE", "source": "MODEL", "created_at": iso,
-             "content": "Антигравити подключён: диалог и финальный ответ видны в плеере."},
+             "content": "Запускаю проверку…"},
+            {"step_index": 3, "type": "SYSTEM_MESSAGE", "source": "SYSTEM", "created_at": iso,
+             "content": "Фоновая проверка завершена"},
+            {"step_index": 4, "type": "PLANNER_RESPONSE", "source": "MODEL", "created_at": iso,
+             "content": "Итоговый отчёт: всё готово, диалог и финальный ответ видны в плеере."},
         ]
         tfile.write_text("\n".join(json.dumps(s, ensure_ascii=False) for s in steps) + "\n", encoding="utf-8")
 
         items = watchers.poll()
-        self.assertEqual(len(items), 1)
-        self.assertEqual(items[0]["source"], "antigravity")
-        self.assertIn("Antigravity · привет давай проверим антигравити", items[0]["author"])
-        self.assertEqual(items[0]["prompt"], "привет давай проверим антигравити")
-        self.assertIn("Антигравити подключён", items[0]["text"])
+        self.assertEqual(len(items), 2)
+        for it in items:
+            self.assertEqual(it["source"], "antigravity")
+            self.assertIn("Antigravity · привет давай проверим антигравити", it["author"])
+            self.assertEqual(it["prompt"], "привет давай проверим антигравити")
+        self.assertEqual(items[0]["text"], "Запускаю проверку…")
+        self.assertIn("Итоговый отчёт: всё готово", items[1]["text"])
+
+        # И при повторном опросе без новых строк дубли не отдаются
+        self.assertEqual(watchers.poll(), [])
+
+        # проверим также fetch_recent на этом многофазном диалоге
+        recent_agy = [it for it in watchers.fetch_recent(limit_per_source=5) if it["source"] == "antigravity"]
+        self.assertEqual(len(recent_agy), 2)
+        self.assertIn("Итоговый отчёт: всё готово", recent_agy[1]["text"])
 
         # проверим также vp_feed.extract_full на этом же файле Antigravity
         text, sess, prompt = vp_feed.extract_full(
             {"conversationId": "conv-12345678", "transcriptPath": str(tfile)},
             "antigravity",
         )
-        self.assertIn("Антигравити подключён", text)
+        self.assertIn("Итоговый отчёт: всё готово", text)
         self.assertEqual(sess, "conv-123")
         self.assertEqual(prompt, "привет давай проверим антигравити")
+
+    def test_antigravity_midturn_start_preserves_prompt(self):
+        now = time.time()
+        iso = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now))
+        tdir = self.gemini / "antigravity" / "brain" / "conv-midturn1" / ".system_generated" / "logs"
+        tdir.mkdir(parents=True)
+        tfile = tdir / "transcript.jsonl"
+        initial = [
+            {"step_index": 0, "type": "USER_INPUT", "source": "USER_EXPLICIT", "created_at": iso,
+             "content": "<USER_REQUEST>\nсобери проект целиком\n</USER_REQUEST>"},
+            {"step_index": 1, "type": "PLANNER_RESPONSE", "source": "MODEL", "created_at": iso,
+             "content": "Собираю…", "tool_calls": [{"name": "run_command"}]},
+        ]
+        tfile.write_text("\n".join(json.dumps(s, ensure_ascii=False) for s in initial) + "\n", encoding="utf-8")
+
+        watchers = vw.Watchers(self.state_file, home=self.home)
+        # Первый опрос в середине уже идущего хода фиксирует позицию, не проглатывая будущий финал
+        self.assertEqual(watchers.poll(), [])
+
+        final_step = {"step_index": 2, "type": "PLANNER_RESPONSE", "source": "MODEL", "created_at": iso,
+                      "content": "Сборка завершена без ошибок."}
+        with open(tfile, "a", encoding="utf-8") as f:
+            f.write(json.dumps(final_step, ensure_ascii=False) + "\n")
+
+        items = watchers.poll()
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]["prompt"], "собери проект целиком")
+        self.assertEqual(items[0]["text"], "Сборка завершена без ошибок.")
 
     def test_ollama_watcher(self):
         ollama_dir = self.home / "AppData" / "Local" / "Ollama"
