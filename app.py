@@ -1312,24 +1312,56 @@ def _get_tts_loop():
 
 
 def _synthesize_inproc(text: str, rate: str, mp3_path: "Path", voice: str = TTS_VOICE) -> tuple:
-    """Озвучка edge-tts ВНУТРИ процесса (фолбэк для собранного .exe, где нет отдельного python)."""
+    """Озвучка edge-tts ВНУТРИ процесса с параллельной hedged-гонкой при сбоях WebSocket."""
     import asyncio, edge_tts
 
-    async def _run():
-        comm = edge_tts.Communicate(text, voice or TTS_VOICE, rate=rate,
-                                    connect_timeout=12, receive_timeout=18)
+    target_voice = voice or TTS_VOICE
+
+    async def _fetch_once(conn_to: float, recv_to: float) -> tuple:
+        comm = edge_tts.Communicate(text, target_voice, rate=rate,
+                                    connect_timeout=conn_to, receive_timeout=recv_to)
+        audio = bytearray()
         sents = []; words = []
-        with open(mp3_path, "wb") as f:
-            async for chunk in comm.stream():
-                t = chunk.get("type")
-                if t == "audio":
-                    f.write(chunk["data"])
-                elif t in ("SentenceBoundary", "WordBoundary"):
-                    start = chunk["offset"] / 1e7
-                    end = start + chunk["duration"] / 1e7
-                    (sents if t == "SentenceBoundary" else words).append(
-                        (start, end, str(chunk.get("text") or "")))
-        return sents, words
+        async for chunk in comm.stream():
+            t = chunk.get("type")
+            if t == "audio":
+                audio.extend(chunk["data"])
+            elif t in ("SentenceBoundary", "WordBoundary"):
+                start = chunk["offset"] / 1e7
+                end = start + chunk["duration"] / 1e7
+                (sents if t == "SentenceBoundary" else words).append(
+                    (start, end, str(chunk.get("text") or "")))
+        if not audio:
+            raise RuntimeError("NoAudioReceived: empty stream")
+        return bytes(audio), sents, words
+
+    async def _run():
+        last_err = None
+        for branches, conn_to, recv_to in ((1, 8, 10), (3, 8, 12), (3, 10, 15)):
+            if branches == 1:
+                try:
+                    data, sents, words = await _fetch_once(conn_to, recv_to)
+                    Path(mp3_path).write_bytes(data)
+                    return sents, words
+                except Exception as e:
+                    last_err = e
+                    continue
+            tasks = [asyncio.create_task(_fetch_once(conn_to, recv_to)) for _ in range(branches)]
+            try:
+                for fut in asyncio.as_completed(tasks):
+                    try:
+                        data, sents, words = await fut
+                        Path(mp3_path).write_bytes(data)
+                        return sents, words
+                    except Exception as e:
+                        last_err = e
+            finally:
+                pending = [t for t in tasks if not t.done()]
+                for t in pending:
+                    t.cancel()
+                if pending:
+                    await asyncio.gather(*pending, return_exceptions=True)
+        raise last_err or RuntimeError("NoAudioReceived")
 
     loop = _get_tts_loop()
     return loop.run_until_complete(asyncio.wait_for(_run(), timeout=TTS_TIMEOUT_S))
@@ -1631,45 +1663,7 @@ def _find_local_fallback_voice(text: str = "") -> str:
 
 
 def _has_local_fallback_voice(voice: str) -> bool:
-    if vp_piper.is_local(voice):
-        return False
-    return bool(_find_local_fallback_voice())
-
-
-_EDGE_LOCK = threading.Lock()
-_EDGE_FAIL_THRESHOLD = 2
-_EDGE_COOLDOWN_S = 180.0
-_edge_fail_streak = 0
-_edge_cooldown_until = 0.0
-
-
-def _edge_in_cooldown() -> bool:
-    with _EDGE_LOCK:
-        return time.time() < _edge_cooldown_until
-
-
-def _reset_edge_cooldown() -> None:
-    global _edge_fail_streak, _edge_cooldown_until
-    with _EDGE_LOCK:
-        _edge_fail_streak = 0
-        _edge_cooldown_until = 0.0
-
-
-def _note_edge_success() -> None:
-    _reset_edge_cooldown()
-
-
-def _note_edge_failure() -> bool:
-    global _edge_fail_streak, _edge_cooldown_until
-    with _EDGE_LOCK:
-        _edge_fail_streak += 1
-        if _edge_fail_streak >= _EDGE_FAIL_THRESHOLD:
-            was_cooling = time.time() < _edge_cooldown_until
-            _edge_cooldown_until = time.time() + _EDGE_COOLDOWN_S
-            if not was_cooling:
-                log_line(f"edge-tts cooldown {int(_EDGE_COOLDOWN_S)}s -> instant local Piper")
-            return True
-        return False
+    return False
 
 
 def generate_supporter_key(seed: str = "") -> str:
@@ -1699,16 +1693,13 @@ def _synthesize_with_retries(text: str, rate: str, mp3_file: "Path", voice: str,
     """Одна часть: (sents, words), либо RuntimeError после всех попыток."""
     last_err = "render failed"
     is_local = vp_piper.is_local(voice)
-    has_local = (not is_local) and _has_local_fallback_voice(voice)
-    max_retries = 0 if is_local else (1 if has_local else 2)
+    max_retries = 0 if is_local else 1
     for attempt in range(1, max_retries + 2):
         if cancel_evt is not None and cancel_evt.is_set():
             raise RuntimeError("cancelled")
         try:
             sents, words = _synthesize(text, rate, mp3_file, voice)
             if mp3_file.exists() and mp3_file.stat().st_size > 0:
-                if not is_local:
-                    _note_edge_success()
                 if attempt > 1:
                     log_line(f"render OK [{item_id}] attempt={attempt} text='{text[:60]}'")
                 return sents, words
@@ -1723,10 +1714,8 @@ def _synthesize_with_retries(text: str, rate: str, mp3_file: "Path", voice: str,
         if cancel_evt is not None and cancel_evt.is_set():
             raise RuntimeError("cancelled")
         log_line(f"render FAIL [{item_id}] {mp3_file.stem} attempt={attempt}/{max_retries+1}: {last_err}")
-        if not is_local and _note_edge_failure() and has_local:
-            break
         if attempt <= max_retries:
-            delay = 0.4 if has_local else min(TTS_RETRY_DELAY_S * attempt, 2.5)
+            delay = 0.6
             if cancel_evt is not None:
                 if cancel_evt.wait(delay):
                     raise RuntimeError("cancelled")
@@ -1781,13 +1770,6 @@ def render_audio_blocking(item: Item, rate: str = TTS_RATE, voice: str = TTS_VOI
         item.audio_error = "пустой текст"
         log_line(f"render skip [{item.id}]: no speakable text")
         return
-    if not vp_piper.is_local(voice) and _edge_in_cooldown():
-        fast_piper = _find_local_fallback_voice(body)
-        if fast_piper:
-            voice = fast_piper
-            if not item.parts_done:
-                item.rendered_voice = fast_piper
-
     mp3_file = AUDIO_DIR / f"{item.id}.mp3"
     if not item.parts_done:
         item.marks = []; item.word_marks = []
@@ -1838,13 +1820,6 @@ def render_audio_blocking(item: Item, rate: str = TTS_RATE, voice: str = TTS_VOI
             if on_part is None or not item.parts_done:
                 item.audio_ready = False
     if item.audio_error:
-        # Если облачный TTS упал (даже посреди многочастной реплики) — дорендериваем установленным локальным Piper.
-        fallback_voice = _find_local_fallback_voice(body)
-        if not vp_piper.is_local(voice) and fallback_voice:
-            log_line(f"render fallback [{item.id}]: {voice} -> {fallback_voice} (from part {len(item.parts_done)})")
-            item.audio_error = None
-            item.rendered_voice = fallback_voice
-            render_audio_blocking(item, rate, fallback_voice, lead, on_part)
         return
     if len(spans) > 1:                               # склеить в один файл: перемотка, сохранение, запуск заново
         try:
@@ -7625,7 +7600,6 @@ class VoicePlayerApp:
             self._retry_render(self.queue_items[idx])
 
     def _retry_render(self, item: Item):
-        _reset_edge_cooldown()
         self._reset_render_state(item)
         log_line(f"manual retry [{item.id}] text='{item.text[:60]}'")
         self._q_put(item, 50)
@@ -7633,7 +7607,6 @@ class VoicePlayerApp:
 
     def _retry_all_failed(self):
         """Перерендерить все реплики со знаком ⚠ (упавшие)."""
-        _reset_edge_cooldown()
         failed = [it for it in self.queue_items if it.audio_error and not it.audio_ready and not it.deleted]
         for it in failed:
             self._reset_render_state(it)
