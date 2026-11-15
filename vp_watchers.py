@@ -94,13 +94,15 @@ def _extract_user_item_text(item_json: Optional[str]) -> str:
 class CodexWatcher:
     source = "codex"
 
-    def __init__(self, codex_home: Path, state: dict):
+    def __init__(self, codex_home: Path, state: dict, cloud_reader: Optional[Callable[[str], list]] = None):
         self.home = Path(codex_home)
         self.state = state
+        self._cloud_reader = cloud_reader
 
     def available(self) -> bool:
         return (_latest(self.home, "thread_history_*.sqlite") is not None
-                or (self.home / "sessions").is_dir())
+                or (self.home / "sessions").is_dir()
+                or (self.home / "sqlite" / "codex.db").is_file())
 
     def _thread_meta(self, ids: list) -> dict:
         db = _latest(self.home, "state_*.sqlite")
@@ -124,7 +126,7 @@ class CodexWatcher:
         now = time.time() if now is None else now
         out = []
         seen_sigs = set(self.state.get("sigs") or [])
-        for rec in self._poll_sqlite(now) + self._poll_rollouts(now):
+        for rec in self._poll_sqlite(now) + self._poll_rollouts(now) + self._poll_cloud_threads(now):
             sig = _sig(rec.get("session", ""), rec.get("text", ""))
             if sig in seen_sigs:
                 continue
@@ -210,6 +212,129 @@ class CodexWatcher:
         self.state["seen"] = [r[1] for r in rows if abs(_ts(r[2]) - cursor) < 2.0]
         return out
 
+    def _cloud_reader_fn(self):
+        if self._cloud_reader is not None:
+            return self._cloud_reader
+        try:
+            import vp_codex_uia
+            if vp_codex_uia.is_available():
+                return vp_codex_uia.read_codex_blocks
+        except Exception:
+            pass
+        return None
+
+    def _read_cloud_catalog(self) -> list:
+        db = self.home / "sqlite" / "codex.db"
+        if not db.is_file():
+            return []
+        try:
+            con = _ro(db)
+            try:
+                return con.execute(
+                    "SELECT thread_id, display_title, source_updated_at "
+                    "FROM local_thread_catalog "
+                    "WHERE host_id LIKE 'chatgpt:%' "
+                    "ORDER BY source_updated_at DESC LIMIT 10"
+                ).fetchall()
+            finally:
+                con.close()
+        except sqlite3.Error:
+            return []
+
+    def _poll_cloud_threads(self, now: float) -> list:
+        reader = self._cloud_reader_fn()
+        if reader is None:
+            return []
+        rows = self._read_cloud_catalog()
+        if not rows:
+            return []
+
+        cloud_ts = self.state.setdefault("cloud_ts", {})
+        cloud_seen = self.state.setdefault("cloud_seen", {})
+        cloud_watch = self.state.setdefault("cloud_watch", {})
+
+        if not self.state.get("cloud_init"):
+            for tid, title, ts in rows:
+                if tid and ts is not None:
+                    cloud_ts[tid] = float(ts)
+            # Базовый снимок открытого окна, чтобы не озвучивать старую историю при старте
+            if rows and rows[0][0]:
+                try:
+                    init_blocks = reader(rows[0][1] or "")
+                    if init_blocks:
+                        cloud_seen[rows[0][0]] = [_sig(rows[0][0], b) for b in init_blocks[-40:]]
+                except Exception:
+                    pass
+            self.state["cloud_init"] = True
+            return []
+
+        for tid, title, ts in rows:
+            if not tid or ts is None:
+                continue
+            ts_f = float(ts)
+            prev_ts = float(cloud_ts.get(tid) or 0.0)
+            if ts_f > prev_ts and (now - ts_f) <= CATCHUP_S:
+                cloud_ts[tid] = ts_f
+                cloud_watch[tid] = {
+                    "title": title or "",
+                    "deadline": now + 60.0,
+                    "next": now,
+                    "cand": "",
+                    "cand_at": 0.0,
+                }
+
+        out = []
+        for tid in list(cloud_watch.keys()):
+            w = cloud_watch[tid]
+            if now > float(w.get("deadline") or 0):
+                cloud_watch.pop(tid, None)
+                continue
+            if now < float(w.get("next") or 0):
+                continue
+            w["next"] = now + 2.0
+            try:
+                blocks = reader(w.get("title") or "")
+            except Exception:
+                blocks = []
+            if not blocks:
+                continue
+            seen_list = cloud_seen.get(tid)
+            if seen_list is None:
+                # Переключились на новый тред: запоминаем всё кроме последнего блока
+                cloud_seen[tid] = [_sig(tid, b) for b in blocks[:-1]][-40:]
+                seen_set = set(cloud_seen[tid])
+            else:
+                seen_set = set(seen_list)
+            fresh = [b for b in blocks if _sig(tid, b) not in seen_set]
+            if not fresh:
+                continue
+            candidate = fresh[-1]
+            if candidate != w.get("cand"):
+                w["cand"] = candidate
+                w["cand_at"] = now
+                continue
+            if now - float(w.get("cand_at") or now) < 1.5:
+                continue
+            # Ответ стабилизировался — ставим в очередь
+            for b in fresh:
+                sig_b = _sig(tid, b)
+                if sig_b not in seen_set:
+                    seen_set.add(sig_b)
+            cloud_seen[tid] = list(seen_set)[-60:]
+            title = _short(w.get("title") or tid[:8])
+            out.append({
+                "source": self.source,
+                "author": f"Codex · {title}" if title else "Codex",
+                "session": tid,
+                "title": title,
+                "prompt": "",
+                "time": time.strftime("%H:%M", time.localtime(now)),
+                "text": candidate,
+                "key": f"codex-cloud:{tid}:{_sig(tid, candidate)}",
+            })
+            cloud_watch.pop(tid, None)
+        return out
+
     def mark_all_seen(self) -> None:
         now = time.time()
         rfiles = self.state.setdefault("rollouts", {})
@@ -242,6 +367,12 @@ class CodexWatcher:
                     self.state["cursor"] = float(row[0])
             except Exception:
                 pass
+        cloud_ts = self.state.setdefault("cloud_ts", {})
+        for tid, _title, ts in self._read_cloud_catalog():
+            if tid and ts is not None:
+                cloud_ts[tid] = float(ts)
+        self.state["cloud_init"] = True
+        self.state["cloud_watch"] = {}
 
     def _recent_rollout_files(self, now: float) -> list:
         sess_dir = self.home / "sessions"

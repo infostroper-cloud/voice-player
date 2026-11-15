@@ -108,6 +108,39 @@ class CodexAndAntigravityWatchers(unittest.TestCase):
         self.assertEqual(items2[0]["prompt"], "Запусти сборку в терминале")
         self.assertEqual(items2[0]["text"], "Сборка в терминальном Codex прошла успешно.")
 
+    def test_codex_cloud_thread_uia_pickup(self):
+        now = time.time()
+        sdir = self.codex / "sqlite"
+        sdir.mkdir(parents=True, exist_ok=True)
+        cdb = sdir / "codex.db"
+        con = sqlite3.connect(cdb)
+        con.execute("CREATE TABLE local_thread_catalog (host_id TEXT, thread_id TEXT, display_title TEXT, source_updated_at REAL)")
+        con.execute("INSERT INTO local_thread_catalog VALUES ('chatgpt:user-1', 'cloud-t1', 'План проекта Odolopo', ?)", (now,))
+        con.commit()
+        con.close()
+
+        blocks = ["Старый ответ из истории облачного диалога, который был до запуска."]
+        state = {}
+        cw = vw.CodexWatcher(self.codex, state, cloud_reader=lambda _t: list(blocks))
+        self.assertTrue(cw.available())
+        self.assertEqual(cw.poll(now), [])
+
+        # Новое сообщение в облачном треде обновляет source_updated_at и добавляет текст в окно
+        con = sqlite3.connect(cdb)
+        con.execute("UPDATE local_thread_catalog SET source_updated_at = ? WHERE thread_id = 'cloud-t1'", (now + 1,))
+        con.commit()
+        con.close()
+        blocks.append("Новый ответ из облачного Codex Desktop, который должен озвучиться автоматически.")
+
+        # Первый опрос фиксирует кандидата, через >= 1.5с при стабильном тексте отдаёт в очередь
+        self.assertEqual(cw.poll(now + 1.0), [])
+        items = cw.poll(now + 3.0)
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]["source"], "codex")
+        self.assertEqual(items[0]["author"], "Codex · План проекта Odolopo")
+        self.assertEqual(items[0]["text"], "Новый ответ из облачного Codex Desktop, который должен озвучиться автоматически.")
+        self.assertEqual(cw.poll(now + 5.0), [])
+
     def test_antigravity_watcher_and_feed_hook(self):
         now = time.time()
         iso = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now))
