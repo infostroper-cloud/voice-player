@@ -32,7 +32,7 @@ _VOICE_FILES = {
     "dima": ("onnx/model_dima_quantized.onnx", "voices/dima.bin"),
 }
 
-_lock = threading.Lock()
+_lock = vp_piper._lock
 _g2p = None
 _sessions = {}
 _styles = {}
@@ -50,30 +50,12 @@ def is_available() -> bool:
 
 
 def _ensure_assets(name: str) -> tuple:
-    from huggingface_hub import hf_hub_download, snapshot_download
+    from huggingface_hub import hf_hub_download
 
     if name not in _VOICE_FILES:
         name = "sveta"
     onnx_rel, style_rel = _VOICE_FILES[name]
     KOKORO_DIR.mkdir(parents=True, exist_ok=True)
-
-    espeak_dir = KOKORO_DIR / "espeak-data"
-    if not (espeak_dir / "ru_dict").is_file():
-        snapshot_download(
-            repo_id=HF_REPO,
-            allow_patterns=[
-                "espeak-data/ru_dict",
-                "espeak-data/en_dict",
-                "espeak-data/phontab",
-                "espeak-data/phonindex",
-                "espeak-data/phondata",
-                "espeak-data/intonations",
-                "espeak-data/lang/zle/ru",
-                "espeak-data/lang/gmw/en*",
-                "espeak-data/voices/*",
-            ],
-            local_dir=str(KOKORO_DIR),
-        )
 
     for fname in ("ru_g2p.py", "tokenizer.json", "kokoro-config.json"):
         target = KOKORO_DIR / fname
@@ -88,13 +70,13 @@ def _ensure_assets(name: str) -> tuple:
     if not style_path.is_file() or style_path.stat().st_size == 0:
         hf_hub_download(repo_id=HF_REPO, filename=style_rel, local_dir=str(KOKORO_DIR))
 
-    return onnx_path, style_path, espeak_dir
+    return onnx_path, style_path
 
 
 class _KokoroRuG2P:
     """RUAccent + ru_g2p + встроенный espeakbridge из piper (без misaki/phonemizer)."""
 
-    def __init__(self, base_dir: Path, espeak_dir: Path):
+    def __init__(self, base_dir: Path):
         import importlib.util as ilu
         from ruaccent import RUAccent
 
@@ -102,7 +84,6 @@ class _KokoroRuG2P:
         mod = ilu.module_from_spec(spec)
         spec.loader.exec_module(mod)
         self._mod = mod
-        self._espeak_dir = str(espeak_dir)
 
         self._accent = RUAccent()
         self._accent.load(omograph_model_size="turbo3.1", use_dictionary=True, tiny_mode=True)
@@ -114,9 +95,7 @@ class _KokoroRuG2P:
     def _phonemize_espeak(self, marked: str) -> str:
         from piper import espeakbridge
 
-        espeakbridge.initialize(self._espeak_dir)
-        vp_piper._espeak_dirty = True
-        espeakbridge.set_voice("ru")
+        vp_piper.ensure_espeak("ru")
         parts = []
         for ph, term, _eos in espeakbridge.get_phonemes(marked):
             ph = re.sub(r"\([^)]+\)", "", ph)
@@ -145,10 +124,10 @@ def _get_engine(voice: str):
     name = voice[len(VOICE_PREFIX):] if is_local(voice) else "sveta"
     if name not in _VOICE_FILES:
         name = "sveta"
-    onnx_path, style_path, espeak_dir = _ensure_assets(name)
+    onnx_path, style_path = _ensure_assets(name)
 
     if _g2p is None:
-        _g2p = _KokoroRuG2P(KOKORO_DIR, espeak_dir)
+        _g2p = _KokoroRuG2P(KOKORO_DIR)
 
     onnx_key = str(onnx_path)
     if onnx_key not in _sessions:

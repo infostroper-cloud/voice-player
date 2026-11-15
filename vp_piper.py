@@ -178,18 +178,31 @@ def _ensure_model(voice: str) -> Path:
     return path
 
 
-_lock = threading.Lock()      # модель общая: части одной реплики озвучиваются по очереди
+_lock = threading.Lock()      # общий lock для Piper/Kokoro (espeakbridge не потокобезопасен)
 _loaded = {}
-_espeak_dirty = False
+_espeak_ready = False
+
+
+def ensure_espeak(voice: str = "") -> None:
+    """Инициализировать espeakbridge один раз на базе ESPEAK_DATA_DIR (вызывать под _lock).
+
+    Повторная инициализация со сменой каталога данных в espeak-ng повреждает
+    таблицы фонем в памяти и приводит к падению (0xc0000005 в espeakbridge.pyd).
+    """
+    global _espeak_ready
+    from piper import espeakbridge
+
+    if not _espeak_ready:
+        from piper.phonemize_espeak import ESPEAK_DATA_DIR
+
+        espeakbridge.initialize(str(ESPEAK_DATA_DIR))
+        _espeak_ready = True
+    if voice:
+        espeakbridge.set_voice(voice)
 
 
 def _voice_obj(voice: str):
-    global _espeak_dirty
-    if _espeak_dirty:
-        from piper import espeakbridge
-        from piper.phonemize_espeak import ESPEAK_DATA_DIR
-        espeakbridge.initialize(str(ESPEAK_DATA_DIR))
-        _espeak_dirty = False
+    ensure_espeak()
     if voice not in _loaded:
         from piper import PiperVoice
         _loaded.clear()       # держим в памяти один голос
