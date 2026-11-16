@@ -255,7 +255,7 @@ if [ -f "$TARGET_DIR/requirements.txt" ]; then
 fi
 if [ "$PIP_OK" -ne 1 ]; then
     echo "Installing compatible core dependencies..."
-    for pkg in sounddevice numpy edge-tts miniaudio pillow lameenc audiotsm certifi aiohttp piper-tts "onnxruntime>=1.16.0"; do
+    for pkg in sounddevice numpy edge-tts miniaudio pillow lameenc audiotsm certifi aiohttp zstandard piper-tts ruaccent huggingface_hub pypdf "onnxruntime>=1.16.0"; do
         $PY_BIN -m pip install --quiet "$pkg" 2>/dev/null || \
         $PY_BIN -m pip install --user --quiet "$pkg" 2>/dev/null || \
         $PY_BIN -m pip install --break-system-packages --quiet "$pkg" 2>/dev/null || true

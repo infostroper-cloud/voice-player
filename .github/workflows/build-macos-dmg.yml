@@ -58,7 +58,7 @@ jobs:
           if [ -f "$APP_DIR/requirements.txt" ]; then
             pip install -r "$APP_DIR/requirements.txt" || true
           fi
-          pip install pyinstaller sounddevice numpy edge-tts miniaudio pillow lameenc audiotsm certifi aiohttp piper-tts onnxruntime
+          pip install pyinstaller sounddevice numpy edge-tts miniaudio pillow lameenc audiotsm certifi aiohttp zstandard piper-tts ruaccent huggingface_hub pypdf onnxruntime
 
       - name: Build VoicePlayer.app & VoicePlayer.dmg
         run: |
