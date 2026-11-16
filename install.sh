@@ -46,7 +46,7 @@ if [ "$PLATFORM" = "macOS" ]; then
     done
     if [ -z "$PY_BIN" ] && command -v brew >/dev/null 2>&1; then
         echo "🔧 Homebrew detected. Installing Python 3.12 + Tkinter..."
-        brew install python@3.12 python-tk@3.12 || true
+        HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_INSTALL_CLEANUP=1 brew install python@3.12 python-tk@3.12 || true
         for cand in "/opt/homebrew/bin/python3.12" "/usr/local/bin/python3.12" "/opt/homebrew/opt/python@3.12/bin/python3.12"; do
             if [ -x "$cand" ]; then PY_BIN="$cand"; break; fi
         done

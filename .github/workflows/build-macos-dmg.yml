@@ -60,18 +60,61 @@ jobs:
           fi
           pip install pyinstaller sounddevice numpy edge-tts miniaudio pillow lameenc audiotsm certifi aiohttp zstandard piper-tts ruaccent huggingface_hub pypdf onnxruntime
 
-      - name: Build VoicePlayer.app & VoicePlayer.dmg
+      - name: Generate macOS .icns icon & build VoicePlayer.app
         run: |
           APP_DIR="${{ steps.rel.outputs.app_dir }}"
           cd "$APP_DIR"
+
+          ICON_FLAG=""
+          PNG_SRC=""
+          [ -f icon.png ] && PNG_SRC="icon.png"
+          [ -z "$PNG_SRC" ] && [ -f "${{ github.workspace }}/icon.png" ] && PNG_SRC="${{ github.workspace }}/icon.png"
+          [ -z "$PNG_SRC" ] && [ -f "${{ github.workspace }}/web/icon.png" ] && PNG_SRC="${{ github.workspace }}/web/icon.png"
+
+          if [ -n "$PNG_SRC" ]; then
+            mkdir -p VoicePlayer.iconset
+            for sz in 16 32 128 256 512; do
+              sips -z $sz $sz "$PNG_SRC" --out "VoicePlayer.iconset/icon_${sz}x${sz}.png" >/dev/null
+              dbl=$((sz * 2))
+              sips -z $dbl $dbl "$PNG_SRC" --out "VoicePlayer.iconset/icon_${sz}x${sz}@2x.png" >/dev/null
+            done
+            iconutil -c icns VoicePlayer.iconset -o VoicePlayer.icns
+            ICON_FLAG="--icon VoicePlayer.icns"
+          fi
+
           EXTRA_DATA=""
           [ -f VERSION ] && EXTRA_DATA="$EXTRA_DATA --add-data VERSION:."
           [ -f icon.png ] && EXTRA_DATA="$EXTRA_DATA --add-data icon.png:."
           [ -d hooks ] && EXTRA_DATA="$EXTRA_DATA --add-data hooks:hooks"
-          pyinstaller --noconfirm --windowed --name VoicePlayer $EXTRA_DATA \
+
+          pyinstaller --noconfirm --windowed --name VoicePlayer $ICON_FLAG $EXTRA_DATA \
+            --osx-bundle-identifier com.voiceplayer.app \
+            --collect-all edge_tts --collect-all sounddevice --collect-all miniaudio \
+            --collect-all audiotsm --collect-all certifi --collect-all aiohttp \
+            --collect-all zstandard --collect-all piper \
+            --hidden-import vp_auth --hidden-import vp_watchers --hidden-import vp_ai --hidden-import vp_feed \
             --exclude-module torch --exclude-module transformers --exclude-module scipy \
             --exclude-module pandas --exclude-module matplotlib --exclude-module pytest \
             app.py
+
+          # Ad-hoc sign bundle so Apple Silicon macOS allows launching it
+          codesign --force --deep --sign - dist/VoicePlayer.app
+
+      - name: Smoke-test VoicePlayer.app & package VoicePlayer.dmg
+        run: |
+          APP_DIR="${{ steps.rel.outputs.app_dir }}"
+          cd "$APP_DIR"
+          # Verify binary starts without immediate Python import/crash (run for 3s then kill)
+          ./dist/VoicePlayer.app/Contents/MacOS/VoicePlayer &
+          APP_PID=$!
+          sleep 3
+          if ! kill -0 $APP_PID 2>/dev/null; then
+            wait $APP_PID || true
+            echo "ERROR: VoicePlayer.app exited prematurely during smoke test!"
+            exit 1
+          fi
+          kill $APP_PID 2>/dev/null || true
+
           mkdir -p dmg_stage
           cp -R dist/VoicePlayer.app dmg_stage/
           ln -s /Applications dmg_stage/Applications
