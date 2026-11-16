@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url><loc>https://infostroper-cloud.github.io/voice-player/</loc><priority>1.0</priority></url>
+  <url><loc>https://infostroper-cloud.github.io/voice-player/index-en.html</loc><priority>0.9</priority></url>
+  <url><loc>https://infostroper-cloud.github.io/voice-player/index-de.html</loc><priority>0.8</priority></url>
+  <url><loc>https://infostroper-cloud.github.io/voice-player/index-es.html</loc><priority>0.8</priority></url>
+  <url><loc>https://infostroper-cloud.github.io/voice-player/index-fr.html</loc><priority>0.8</priority></url>
+  <url><loc>https://infostroper-cloud.github.io/voice-player/index-hi.html</loc><priority>0.8</priority></url>
+  <url><loc>https://infostroper-cloud.github.io/voice-player/index-ja.html</loc><priority>0.8</priority></url>
+  <url><loc>https://infostroper-cloud.github.io/voice-player/index-zh.html</loc><priority>0.8</priority></url>
+  <url><loc>https://infostroper-cloud.github.io/voice-player/download.html</loc><priority>0.9</priority></url>
+  <url><loc>https://infostroper-cloud.github.io/voice-player/privacy.html</loc><priority>0.4</priority></url>
+  <url><loc>https://infostroper-cloud.github.io/voice-player/terms.html</loc><priority>0.4</priority></url>
+</urlset>
