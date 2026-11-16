@@ -21,8 +21,13 @@ echo "Detected platform: $PLATFORM"
 PY_BIN=""
 if [ "$PLATFORM" = "macOS" ]; then
     MAC_CANDIDATES=(
+        "/opt/homebrew/bin/python3.13"
+        "/opt/homebrew/bin/python3.12"
+        "/opt/homebrew/bin/python3.11"
         "/opt/homebrew/bin/python3"
+        "/usr/local/bin/python3.12"
         "/usr/local/bin/python3"
+        "/Library/Frameworks/Python.framework/Versions/3.14/bin/python3"
         "/Library/Frameworks/Python.framework/Versions/3.13/bin/python3"
         "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3"
         "/Library/Frameworks/Python.framework/Versions/3.11/bin/python3"
@@ -33,14 +38,31 @@ if [ "$PLATFORM" = "macOS" ]; then
     )
     for cand in "${MAC_CANDIDATES[@]}"; do
         if [ -n "$cand" ] && [ -x "$cand" ]; then
-            if "$cand" -c "import tkinter as tk; r = tk.Tk(); r.withdraw(); r.destroy()" >/dev/null 2>&1; then
+            if "$cand" -c "import sys, tkinter as tk; assert sys.version_info >= (3, 10); r = tk.Tk(); r.withdraw(); r.destroy()" >/dev/null 2>&1; then
                 PY_BIN="$cand"
                 break
-            elif [ -z "$PY_BIN" ]; then
-                PY_BIN="$cand"
             fi
         fi
     done
+    if [ -z "$PY_BIN" ] && command -v brew >/dev/null 2>&1; then
+        echo "🔧 Homebrew detected. Installing Python 3.12 + Tkinter..."
+        brew install python@3.12 python-tk@3.12 || true
+        for cand in "/opt/homebrew/bin/python3.12" "/usr/local/bin/python3.12" "/opt/homebrew/opt/python@3.12/bin/python3.12"; do
+            if [ -x "$cand" ]; then PY_BIN="$cand"; break; fi
+        done
+    fi
+    if [ -z "$PY_BIN" ]; then
+        for cand in "${MAC_CANDIDATES[@]}"; do
+            if [ -n "$cand" ] && [ -x "$cand" ]; then
+                if "$cand" -c "import tkinter as tk; r = tk.Tk(); r.withdraw(); r.destroy()" >/dev/null 2>&1; then
+                    PY_BIN="$cand"
+                    break
+                elif [ -z "$PY_BIN" ]; then
+                    PY_BIN="$cand"
+                fi
+            fi
+        done
+    fi
 fi
 
 if [ -z "$PY_BIN" ]; then
@@ -212,24 +234,32 @@ cat << EOF > "$INSTALL_DIR/current-version.json"
 {"version": "$DETECTED_VER"}
 EOF
 
-# Install python dependencies (use venv on PEP 668 / Homebrew Python if --user is blocked)
+# Install python dependencies (prefer isolated venv on macOS/Linux)
 echo "Installing Python dependencies (sounddevice, edge-tts, piper-tts, etc.)..."
+if [ ! -d "$INSTALL_DIR/venv" ]; then
+    $PY_BIN -m venv "$INSTALL_DIR/venv" 2>/dev/null || true
+fi
+if [ -x "$INSTALL_DIR/venv/bin/python" ]; then
+    PY_BIN="$INSTALL_DIR/venv/bin/python"
+    $PY_BIN -m pip install --upgrade pip --quiet 2>/dev/null || true
+fi
+PIP_OK=0
 if [ -f "$TARGET_DIR/requirements.txt" ]; then
-    if ! $PY_BIN -m pip install --user --quiet -r "$TARGET_DIR/requirements.txt" 2>/dev/null; then
-        if [ ! -d "$INSTALL_DIR/venv" ]; then
-            $PY_BIN -m venv "$INSTALL_DIR/venv" 2>/dev/null || true
-        fi
-        if [ -x "$INSTALL_DIR/venv/bin/python" ]; then
-            PY_BIN="$INSTALL_DIR/venv/bin/python"
-            $PY_BIN -m pip install --quiet -r "$TARGET_DIR/requirements.txt" || true
-        else
-            $PY_BIN -m pip install --break-system-packages --quiet -r "$TARGET_DIR/requirements.txt" || true
-        fi
+    if $PY_BIN -m pip install --quiet -r "$TARGET_DIR/requirements.txt" 2>/dev/null; then
+        PIP_OK=1
+    elif $PY_BIN -m pip install --user --quiet -r "$TARGET_DIR/requirements.txt" 2>/dev/null; then
+        PIP_OK=1
+    elif $PY_BIN -m pip install --break-system-packages --quiet -r "$TARGET_DIR/requirements.txt" 2>/dev/null; then
+        PIP_OK=1
     fi
-else
-    echo "Installing core dependencies directly..."
-    $PY_BIN -m pip install --user --quiet sounddevice numpy edge-tts miniaudio pillow lameenc audiotsm 2>/dev/null || \
-    $PY_BIN -m pip install --break-system-packages --quiet sounddevice numpy edge-tts miniaudio pillow lameenc audiotsm || true
+fi
+if [ "$PIP_OK" -ne 1 ]; then
+    echo "Installing compatible core dependencies..."
+    for pkg in sounddevice numpy edge-tts miniaudio pillow lameenc audiotsm certifi aiohttp piper-tts "onnxruntime>=1.16.0"; do
+        $PY_BIN -m pip install --quiet "$pkg" 2>/dev/null || \
+        $PY_BIN -m pip install --user --quiet "$pkg" 2>/dev/null || \
+        $PY_BIN -m pip install --break-system-packages --quiet "$pkg" 2>/dev/null || true
+    done
 fi
 
 # Launcher script

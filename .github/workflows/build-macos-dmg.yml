@@ -1,0 +1,84 @@
+name: Build macOS DMG
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to attach VoicePlayer.dmg (empty = latest)"
+        required: false
+        default: ""
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  build-dmg:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Resolve release tag & source
+        id: rel
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INPUT_TAG: ${{ github.event.inputs.tag }}
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            if [ -n "$INPUT_TAG" ]; then
+              TAG="$INPUT_TAG"
+            else
+              TAG=$(gh release list --limit 1 --json tagName --jq '.[0].tagName')
+            fi
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          mkdir -p src_pkg
+          gh release download "$TAG" -p "*.zip" -D src_pkg || true
+          ZIP_FILE=$(ls src_pkg/*.zip 2>/dev/null | head -n 1 || true)
+          if [ -n "$ZIP_FILE" ]; then
+            unzip -q "$ZIP_FILE" -d src_app
+          else
+            cp -r . src_app
+          fi
+          APP_PATH=$(find src_app -name "app.py" | head -n 1)
+          echo "app_dir=$(dirname "$APP_PATH")" >> "$GITHUB_OUTPUT"
+
+      - name: Install dependencies & PyInstaller
+        run: |
+          python -m pip install --upgrade pip
+          APP_DIR="${{ steps.rel.outputs.app_dir }}"
+          if [ -f "$APP_DIR/requirements.txt" ]; then
+            pip install -r "$APP_DIR/requirements.txt" || true
+          fi
+          pip install pyinstaller sounddevice numpy edge-tts miniaudio pillow lameenc audiotsm certifi aiohttp piper-tts onnxruntime
+
+      - name: Build VoicePlayer.app & VoicePlayer.dmg
+        run: |
+          APP_DIR="${{ steps.rel.outputs.app_dir }}"
+          cd "$APP_DIR"
+          EXTRA_DATA=""
+          [ -f VERSION ] && EXTRA_DATA="$EXTRA_DATA --add-data VERSION:."
+          [ -f icon.png ] && EXTRA_DATA="$EXTRA_DATA --add-data icon.png:."
+          [ -d hooks ] && EXTRA_DATA="$EXTRA_DATA --add-data hooks:hooks"
+          pyinstaller --noconfirm --windowed --name VoicePlayer $EXTRA_DATA \
+            --exclude-module torch --exclude-module transformers --exclude-module scipy \
+            --exclude-module pandas --exclude-module matplotlib --exclude-module pytest \
+            app.py
+          mkdir -p dmg_stage
+          cp -R dist/VoicePlayer.app dmg_stage/
+          ln -s /Applications dmg_stage/Applications
+          hdiutil create -volname "VoicePlayer" -srcfolder dmg_stage -ov -format UDZO "${{ github.workspace }}/VoicePlayer.dmg"
+
+      - name: Upload VoicePlayer.dmg to Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "${{ steps.rel.outputs.tag }}" "${{ github.workspace }}/VoicePlayer.dmg" --clobber
