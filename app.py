@@ -1375,6 +1375,10 @@ class VoicePlayerApp:
         return im.resize((size, size), Image.LANCZOS)
 
     def _apply_modern_icon(self):
+        if IS_MAC and getattr(sys, "frozen", False):
+            # В .app-бандле macOS уже есть Retina-иконка .icns; iconphoto(64/32/16)
+            # перетирает её в Dock на мыльную растровую картинку.
+            return
         if IS_WIN and ICON_PATH.exists():
             try:
                 self.root.iconbitmap(str(ICON_PATH))
@@ -1385,12 +1389,17 @@ class VoicePlayerApp:
                     pass
 
         try:
-            from PIL import ImageTk
-            self._app_icon_imgs = [
-                ImageTk.PhotoImage(self._draw_modern_app_icon(64)),
-                ImageTk.PhotoImage(self._draw_modern_app_icon(32)),
-                ImageTk.PhotoImage(self._draw_modern_app_icon(16)),
-            ]
+            from PIL import Image, ImageTk
+            if IS_MAC:
+                png = next((d / "icon.png" for d in (_RES_DIR, APP_DIR) if (d / "icon.png").is_file()), None)
+                im = Image.open(png).convert("RGBA").resize((512, 512), Image.LANCZOS) if png else self._draw_modern_app_icon(512)
+                self._app_icon_imgs = [ImageTk.PhotoImage(im)]
+            else:
+                self._app_icon_imgs = [
+                    ImageTk.PhotoImage(self._draw_modern_app_icon(64)),
+                    ImageTk.PhotoImage(self._draw_modern_app_icon(32)),
+                    ImageTk.PhotoImage(self._draw_modern_app_icon(16)),
+                ]
             self.root.iconphoto(True, *self._app_icon_imgs)
         except Exception:
             pass
