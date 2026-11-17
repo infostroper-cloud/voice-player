@@ -7171,7 +7171,7 @@ class VoicePlayerApp:
 
         ttk.Button(key_frame, text=vp_i18n.t("activate_btn"), style="Toggle.TButton", command=activate).grid(row=0, column=2, sticky="e")
 
-        # diag_row = ttk.Frame(box)
+        diag_row = ttk.Frame(box)
         diag_row.grid(row=6, column=0, sticky="ew", pady=(14, 0))
         ttk.Button(diag_row, text="✉ " + vp_i18n.t("support_channel"), style="Primary.TButton",
                    command=lambda: webbrowser.open("https://t.me/voiceplayer_ai")).pack(side="left", padx=(0, 6))
