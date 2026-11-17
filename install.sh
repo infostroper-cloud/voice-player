@@ -79,13 +79,13 @@ fi
 PY_VER=$($PY_BIN -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
 echo "Using Python: $PY_BIN (version $PY_VER)"
 
-# Test Tkinter GUI capability
+# Test Tkinter GUI & Linux audio/pip prerequisites
 if ! $PY_BIN -c "import tkinter as tk; r = tk.Tk(); r.withdraw(); r.destroy()" >/dev/null 2>&1; then
     echo "⚠️ Warning: Tkinter GUI could not initialize on current Python ($PY_BIN)."
     if [ "$PLATFORM" = "macOS" ]; then
         if command -v brew >/dev/null 2>&1; then
             echo "🔧 Homebrew detected. Automatically installing Tkinter support..."
-            brew install python-tk || true
+            HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_INSTALL_CLEANUP=1 brew install python-tk || true
             if [ -x "/opt/homebrew/bin/python3" ]; then PY_BIN="/opt/homebrew/bin/python3"; fi
             if [ -x "/usr/local/bin/python3" ]; then PY_BIN="/usr/local/bin/python3"; fi
         fi
@@ -96,9 +96,18 @@ if ! $PY_BIN -c "import tkinter as tk; r = tk.Tk(); r.withdraw(); r.destroy()" >
             exit 1
         fi
     else
-        echo "  👉 On Ubuntu/Debian: run 'sudo apt update && sudo apt install -y python3-tk libportaudio2'"
-        echo "  👉 On Fedora/RHEL: run 'sudo dnf install -y python3-tkinter portaudio'"
-        echo "  👉 On Arch Linux: run 'sudo pacman -S --noconfirm tk portaudio'"
+        if command -v apt-get >/dev/null 2>&1 && (sudo -n true 2>/dev/null || [ -t 0 ]); then
+            echo "🔧 Installing Linux GUI & audio dependencies (python3-tk, python3-pip, python3-venv, libportaudio2)..."
+            sudo apt-get update -qq && sudo apt-get install -y -qq python3-tk python3-pip python3-venv libportaudio2 pulseaudio-utils || true
+        elif command -v dnf >/dev/null 2>&1 && (sudo -n true 2>/dev/null || [ -t 0 ]); then
+            sudo dnf install -y python3-tkinter python3-pip portaudio || true
+        elif command -v pacman >/dev/null 2>&1 && (sudo -n true 2>/dev/null || [ -t 0 ]); then
+            sudo pacman -S --noconfirm tk python-pip portaudio || true
+        else
+            echo "  👉 On Ubuntu/Debian: run 'sudo apt update && sudo apt install -y python3-tk python3-pip python3-venv libportaudio2'"
+            echo "  👉 On Fedora/RHEL: run 'sudo dnf install -y python3-tkinter python3-pip portaudio'"
+            echo "  👉 On Arch Linux: run 'sudo pacman -S --noconfirm tk python-pip portaudio'"
+        fi
     fi
 fi
 
@@ -159,7 +168,7 @@ DOWNLOADED_FILE=""
 for url in "${CANDIDATE_URLS[@]}"; do
     tmp_dest="$TMP_DIR/download_pkg"
     if command -v curl >/dev/null 2>&1; then
-        if curl -fsSL "$url" -o "$tmp_dest" 2>/dev/null && [ -s "$tmp_dest" ]; then
+        if curl -fsSL --connect-timeout 10 --max-time 60 "$url" -o "$tmp_dest" 2>/dev/null && [ -s "$tmp_dest" ]; then
             DOWNLOADED_FILE="$tmp_dest"
             break
         fi
