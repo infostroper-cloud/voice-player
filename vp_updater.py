@@ -60,10 +60,12 @@ def parse_version(text: str) -> tuple:
 
 
 def read_version(app_dir: Path) -> str:
-    try:
-        return (Path(app_dir) / "VERSION").read_text(encoding="utf-8").strip()
-    except OSError:
-        return "0.0.0"
+    for d in (Path(app_dir), Path(getattr(sys, "_MEIPASS", app_dir))):
+        try:
+            return (d / "VERSION").read_text(encoding="utf-8").strip()
+        except OSError:
+            continue
+    return "0.0.0"
 
 
 def console_python() -> str:
@@ -171,6 +173,29 @@ def restart(app_dir: Path, args: list = ()) -> None:
     env = dict(os.environ, VP_RESTART_WAIT=str(os.getpid()))
     if getattr(sys, "frozen", False):
         upd_dir = home_dir() / "updates"
+        if sys.platform == "darwin":
+            dmgs = sorted(upd_dir.glob("VoicePlayer-*.dmg")) if upd_dir.is_dir() else []
+            app_bundle = Path(sys.executable).resolve().parents[2]
+            if dmgs and app_bundle.suffix == ".app":
+                dmg_path = dmgs[-1]
+                pid = os.getpid()
+                mnt = tempfile.mkdtemp(prefix="vp-upd-")
+                script = (
+                    f'while kill -0 {pid} 2>/dev/null; do sleep 0.2; done; '
+                    f'if hdiutil attach "$1" -nobrowse -readonly -mountpoint "$2" >/dev/null 2>&1; then '
+                    f'  if [ -d "$2/VoicePlayer.app" ]; then '
+                    f'    rm -rf "$3" && cp -R "$2/VoicePlayer.app" "$3" && xattr -cr "$3" 2>/dev/null || true; '
+                    f'  fi; '
+                    f'  hdiutil detach "$2" >/dev/null 2>&1 || true; '
+                    f'fi; '
+                    f'rmdir "$2" 2>/dev/null || true; '
+                    f'rm -f "$1"; '
+                    f'open -n "$3"'
+                )
+                subprocess.Popen(["/bin/sh", "-c", script, "vp-updater", str(dmg_path), mnt, str(app_bundle)],
+                                 env=env, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                 stderr=subprocess.DEVNULL, close_fds=True, start_new_session=True)
+                return
         installers = sorted(upd_dir.glob("VoicePlayer-Setup-*.exe")) if upd_dir.is_dir() else []
         if installers:
             subprocess.Popen([str(installers[-1]), "/SILENT", "/CLOSEAPPLICATIONS"], env=env,
@@ -359,8 +384,21 @@ def check_and_install(app_dir: Path, log=lambda _m: None) -> str:
         return ""
     assets = {a["name"]: a["url"] for a in rel.get("assets") or []}
     if getattr(sys, "frozen", False):
+        if sys.platform == "darwin":
+            dmg_asset = next((assets[n] for n in (f"VoicePlayer-{version}.dmg", "VoicePlayer.dmg") if n in assets), None)
+            if not dmg_asset:
+                return ""
+            upd_dir = home_dir() / "updates"
+            upd_dir.mkdir(parents=True, exist_ok=True)
+            dest_dmg = upd_dir / f"VoicePlayer-{version}.dmg"
+            if dest_dmg.exists() and dest_dmg.stat().st_size > 0:
+                return version
+            log(f"update: скачиваю образ {version}")
+            data = _get(dmg_asset, token, "application/octet-stream")
+            dest_dmg.write_bytes(data)
+            log(f"update: образ {version} готов")
+            return version
         if os.name != "nt":
-            # Собранный macOS .app не может перезапуститься в ~/.voice-player/versions/<ver>/app.py
             return ""
         exe_name = f"VoicePlayer-Setup-{version}.exe"
         if exe_name in assets:

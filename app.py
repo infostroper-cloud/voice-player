@@ -6941,9 +6941,9 @@ class VoicePlayerApp:
         return float("inf")
 
     def _can_restart_now(self) -> bool:
-        if getattr(sys, "frozen", False) and not IS_WIN:
-            return False
-        return (not self.player.is_playing() and not self.player.is_paused()
+        return (bool(self._update_ready)
+                and vp_updater.parse_version(self._update_ready) > vp_updater.parse_version(APP_VERSION)
+                and not self.player.is_playing() and not self.player.is_paused()
                 and self.render_queue.empty() and self._trans_queue.empty()
                 and not self.tts_input.get("1.0", "end").strip()
                 and self._user_idle_s() >= UPDATE_IDLE_S)
