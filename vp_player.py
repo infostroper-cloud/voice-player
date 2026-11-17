@@ -413,7 +413,8 @@ class StreamPlayer:
                 chunk = self._out[self._out_pos:self._out_pos + frames]
                 n = chunk.shape[0]
                 if n > 0:
-                    outdata[:n] = chunk * self._volume
+                    _np.multiply(chunk, self._volume, out=outdata[:n])
+                    _np.clip(outdata[:n], -1.0, 1.0, out=outdata[:n])
                 if n < frames:
                     outdata[n:] = 0
                     if self._src is None or self._stretched_up_to >= self._src.shape[0]:
@@ -473,8 +474,19 @@ class StreamPlayer:
         except Exception:
             return None
 
+    def _pick_target_sr(self) -> int:
+        if sys.platform == "darwin":
+            try:
+                dev_info = _sd.query_devices(kind="output")
+                dsr = int(dev_info.get("default_samplerate") or 0)
+                if dsr >= 22050:
+                    return dsr
+            except Exception:
+                pass
+        return self._PLAY_SR
+
     def load_and_play(self, path, speed: float = 1.0):
-        target_sr = self._sr or self._PLAY_SR
+        target_sr = self._pick_target_sr()
         dec = _miniaudio.decode_file(
             str(path),
             output_format=_miniaudio.SampleFormat.FLOAT32,
@@ -563,11 +575,14 @@ class StreamPlayer:
 
     def append_file(self, path, gen: int) -> bool:
         """Дописать продолжение в конец играющего трека (длинная реплика озвучивается частями)."""
+        with self._lock:
+            target_sr = self._sr or self._PLAY_SR
+            target_ch = self._ch or self._PLAY_CH
         dec = _miniaudio.decode_file(
             str(path),
             output_format=_miniaudio.SampleFormat.FLOAT32,
-            nchannels=self._PLAY_CH,
-            sample_rate=self._PLAY_SR,
+            nchannels=target_ch,
+            sample_rate=target_sr,
         )
         pcm = _np.array(dec.samples, dtype=_np.float32).reshape(-1, dec.nchannels)
         with self._lock:
@@ -599,8 +614,14 @@ class StreamPlayer:
         with self._lock:
             sr = sr or self._sr
             ch = ch or self._ch
+        kw = {}
+        if sys.platform == "darwin":
+            # На macOS CoreAudio: увеличенный буфер (2048 фреймов ≈ 46 мс при 44.1 kHz)
+            # исключает треск/хрип из-за пауз GIL при работе Tkinter и TTS.
+            kw["blocksize"] = 2048
+            kw["latency"] = "high"
         st = _sd.OutputStream(samplerate=sr, channels=ch,
-                              dtype="float32", callback=self._callback)
+                              dtype="float32", callback=self._callback, **kw)
         st.start()
         with self._lock:
             self._stream = st
