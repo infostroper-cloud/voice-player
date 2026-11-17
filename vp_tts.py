@@ -192,6 +192,7 @@ def _synthesize(text: str, rate: str, mp3_path: Path, voice: Optional[str] = Non
     voice = voice or TTS_VOICE
     if vp_kokoro.is_local(voice):
         return vp_kokoro.synthesize(text, voice, mp3_path), []
+    mp3_path.parent.mkdir(parents=True, exist_ok=True)
     if vp_piper.is_local(voice):
         return vp_piper.synthesize(text, voice, mp3_path), []
     try:
