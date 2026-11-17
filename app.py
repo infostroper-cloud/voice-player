@@ -311,7 +311,7 @@ POLL_BOARD_INTERVAL_S = 2.5
 AI_SOURCES = {"antigravity", "claude-code", "codex", "cursor", "gemini", "ollama", "deepseek", "kimi", "perplexity", "cline", "aider"}   # реплики нейросетей (а не команды)
 PREFS_FILE  = Path.home() / ".voice-player-prefs.json"
 SAVED_FILE  = Path.home() / ".voice-player-saved.json"   # закреплённые + избранные (легаси-формат)
-SESSION_FILE = Path.home() / ".voice-player-session.json"  # вся очередь — восстанавливается при старте
+SESSION_FILE = (Path.home() / ".voice-player-session.json").resolve()  # вся очередь — восстанавливается при старте
 SESSION_MAX = 300                                        # сколько последних реплик помнить
 PRONOUNCE_FILE = Path.home() / ".voice-player-pronounce.json"   # словарь произношения
 
