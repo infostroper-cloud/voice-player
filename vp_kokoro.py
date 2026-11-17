@@ -18,7 +18,7 @@ KOKORO_DIR = Path.home() / ".voice-player" / "kokoro"
 HF_REPO = "zaakirio/kokoro-ru"
 SAMPLE_RATE = 24000
 SENTENCE_PAUSE_S = 0.20
-MP3_BITRATE = 64
+MP3_BITRATE = 128
 MAX_IPA_LEN = 480
 
 VOICE_LABELS = {
@@ -188,6 +188,12 @@ def synthesize(text: str, voice: str, mp3_path: Path) -> list:
                 audio = np.asarray(sess.run(None, feed)[0], dtype=np.float32).reshape(-1)
                 if audio.size == 0:
                     continue
+                fade = min(72, audio.size // 4)
+                if fade > 1:
+                    ramp = np.linspace(0.0, 1.0, fade, dtype=np.float32)
+                    audio = audio.copy()
+                    audio[:fade] *= ramp
+                    audio[-fade:] *= ramp[::-1]
                 audio_i16 = np.clip(audio * 32767.0, -32768.0, 32767.0).astype("<i2")
                 pcm += audio_i16.tobytes()
                 t += audio_i16.size / SAMPLE_RATE

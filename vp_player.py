@@ -299,6 +299,12 @@ class StreamPlayer:
 
     # ---------- DSP ----------
     @staticmethod
+    def _make_wsola(channels: int, speed: float):
+        # Параметры под 24 kHz речь: tolerance=300 (12.5 мс) покрывает полный период
+        # основного тона мужского/женского голоса (~80-250 Гц) и убирает тремор.
+        return _wsola(channels=channels, speed=speed, frame_length=1200, synthesis_hop=300, tolerance=300)
+
+    @staticmethod
     def _stretch(frames, speed, tsm=None, flush: bool = True):
         if abs(speed - 1.0) < 1e-3:
             if frames is None or frames.shape[0] == 0:
@@ -308,7 +314,7 @@ class StreamPlayer:
         if tsm is None:
             if frames is None or frames.shape[0] == 0:
                 return frames
-            tsm = _wsola(channels=ch, speed=speed)
+            tsm = StreamPlayer._make_wsola(ch, speed)
         writer = _ArrayWriter(channels=ch)
         if frames is not None and frames.shape[0] > 0:
             reader = _ArrayReader(frames.T.copy())     # (ch, N)
@@ -346,14 +352,14 @@ class StreamPlayer:
                     chunk_end = (total if abs(target - 1.0) < 1e-3
                                  else min(total, src_start + sr * self._HEAD_STRETCH_S))
                     seg_start = src_start
-                    tsm = _wsola(channels=src.shape[1], speed=target) if abs(target - 1.0) >= 1e-3 else None
+                    tsm = self._make_wsola(src.shape[1], target) if abs(target - 1.0) >= 1e-3 else None
                 elif abs(target - self._speed) >= 1e-3:
                     is_reanchor = True
                     src_start = max(0, min(self._src_pos_now(), total))
                     chunk_end = (total if abs(target - 1.0) < 1e-3
                                  else min(total, src_start + sr * self._HEAD_STRETCH_S))
                     seg_start = src_start
-                    tsm = _wsola(channels=src.shape[1], speed=target) if abs(target - 1.0) >= 1e-3 else None
+                    tsm = self._make_wsola(src.shape[1], target) if abs(target - 1.0) >= 1e-3 else None
                 elif self._stretched_up_to < total:
                     is_reanchor = False
                     src_start = self._stretched_up_to
@@ -363,7 +369,7 @@ class StreamPlayer:
                     tsm = self._tsm
                     self._tsm = None
                     if tsm is None and abs(target - 1.0) >= 1e-3:
-                        tsm = _wsola(channels=src.shape[1], speed=target)
+                        tsm = self._make_wsola(src.shape[1], target)
                 else:
                     continue
             flushed = (chunk_end >= total)
@@ -502,7 +508,7 @@ class StreamPlayer:
             out0 = pcm.copy()
         else:
             head_end = min(total, dec.sample_rate * self._HEAD_STRETCH_S)
-            tsm = _wsola(channels=dec.nchannels, speed=speed)
+            tsm = self._make_wsola(dec.nchannels, speed)
             out0 = self._stretch(pcm[:head_end], speed, tsm=tsm, flush=(head_end >= total))
         with self._lock:
             # Переиспользуем ОДИН поток на всю сессию (формат унифицирован до 24 kHz mono):
@@ -614,11 +620,10 @@ class StreamPlayer:
         with self._lock:
             sr = sr or self._sr
             ch = ch or self._ch
-        kw = {}
+        kw = {"blocksize": 2048}
         if sys.platform == "darwin":
             # На macOS CoreAudio: увеличенный буфер (2048 фреймов ≈ 46 мс при 44.1 kHz)
             # исключает треск/хрип из-за пауз GIL при работе Tkinter и TTS.
-            kw["blocksize"] = 2048
             kw["latency"] = "high"
         st = _sd.OutputStream(samplerate=sr, channels=ch,
                               dtype="float32", callback=self._callback, **kw)

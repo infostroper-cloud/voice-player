@@ -13,7 +13,7 @@ VOICE_PREFIX = "piper:"
 VOICES_DIR = Path.home() / ".voice-player" / "voices"
 HF_URL = "https://huggingface.co/rhasspy/piper-voices/resolve/main/ru/ru_RU/{name}/medium/{model}.onnx{ext}"
 SENTENCE_PAUSE_S = 0.22
-MP3_BITRATE = 64
+MP3_BITRATE = 128
 
 # подпись в списке голосов -> id
 VOICE_LABELS = {
