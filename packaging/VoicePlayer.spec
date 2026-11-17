@@ -7,17 +7,31 @@
 # Лёгкая сборка не тащит whisper/fastembed/soundcard (сотни МБ) — приложение
 # само деградирует мягко: эти кнопки покажут «установите движок».
 import os
+import sys
 from PyInstaller.utils.hooks import collect_all
 
 HERE = SPECPATH                              # каталог этого .spec (=packaging/)
 ROOT = os.path.dirname(HERE)                 # корень проекта (=voice-player/)
 APP  = os.path.join(ROOT, "app.py")
-ICON = os.path.join(ROOT, "icon.ico")
+ICON_ICO = os.path.join(ROOT, "icon.ico")
+ICON_ICNS = os.path.join(ROOT, "VoicePlayer.icns")
+ICON = ICON_ICNS if (sys.platform == "darwin" and os.path.exists(ICON_ICNS)) else ICON_ICO
 FULL = os.environ.get("VP_FULL") == "1"
 
+VERSION_FILE = os.path.join(ROOT, "VERSION")
+APP_VER = "1.2.24"
+if os.path.exists(VERSION_FILE):
+    with open(VERSION_FILE, "r", encoding="utf-8") as _vf:
+        APP_VER = _vf.read().strip() or APP_VER
+
 datas, binaries, hiddenimports = [], [], ["edge_tts", "aiohttp", "certifi", "vp_feed"]
-if os.path.exists(ICON):
-    datas.append((ICON, "."))
+if os.path.exists(VERSION_FILE):
+    datas.append((VERSION_FILE, "."))
+if os.path.exists(ICON_ICO):
+    datas.append((ICON_ICO, "."))
+ICON_PNG = os.path.join(ROOT, "icon.png")
+if os.path.exists(ICON_PNG):
+    datas.append((ICON_PNG, "."))
 HOOKS_DIR = os.path.join(ROOT, "hooks")
 if os.path.exists(HOOKS_DIR):
     datas.append((HOOKS_DIR, "hooks"))
@@ -76,7 +90,6 @@ coll = COLLECT(
     name="VoicePlayer",
 )
 
-import sys
 if sys.platform == "darwin":
     app = BUNDLE(
         coll,
@@ -86,8 +99,8 @@ if sys.platform == "darwin":
         info_plist={
             "CFBundleName": "VoicePlayer",
             "CFBundleDisplayName": "VoicePlayer",
-            "CFBundleVersion": "1.2.5",
-            "CFBundleShortVersionString": "1.2.5",
+            "CFBundleVersion": APP_VER,
+            "CFBundleShortVersionString": APP_VER,
             "NSHighResolutionCapable": "True",
             "LSMinimumSystemVersion": "11.0",
         },

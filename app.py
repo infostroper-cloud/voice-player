@@ -13,6 +13,7 @@ TTS: edge-tts, голос en-US-BrianMultilingualNeural, темп +15%.
 from __future__ import annotations
 import ctypes
 import json
+import multiprocessing
 import os
 os.environ["TK_SILENCE_DEPRECATION"] = "1"
 import queue
@@ -35,7 +36,17 @@ from uuid import uuid4
 
 import vp_updater
 if __name__ == "__main__":
+    multiprocessing.freeze_support()
     vp_updater.bootstrap(Path(__file__).resolve().parent)   # до тяжёлых библиотек: могла выйти версия новее
+
+try:
+    import certifi as _certifi
+    _ca = _certifi.where()
+    if _ca and os.path.isfile(_ca):
+        os.environ.setdefault("SSL_CERT_FILE", _ca)
+        os.environ.setdefault("REQUESTS_CA_BUNDLE", _ca)
+except Exception:
+    pass
 
 import vp_integrations
 import vp_kokoro
@@ -214,6 +225,8 @@ else:
     APP_DIR = Path(__file__).resolve().parent
     _RES_DIR = APP_DIR
 APP_VERSION = vp_updater.read_version(APP_DIR)
+if APP_VERSION == "0.0.0" and _RES_DIR != APP_DIR:
+    APP_VERSION = vp_updater.read_version(_RES_DIR)
 UPDATE_FIRST_S = int(os.environ.get("VP_UPDATE_FIRST_S") or 15)        # первая проверка через 15 сек после запуска
 UPDATE_EVERY_S = int(os.environ.get("VP_UPDATE_EVERY_S") or 7200)       # регулярная проверка каждые 2 часа
 UPDATE_IDLE_S  = int(os.environ.get("VP_UPDATE_IDLE_S") or 180)        # фоновый тихий перезапуск при простое 3 мин
@@ -6718,8 +6731,10 @@ class VoicePlayerApp:
                     log_line(f"win foreground error: {e}")
             elif sys.platform == "darwin":
                 try:
-                    subprocess.run(["osascript", "-e", 'tell application "VoicePlayer" to activate'],
-                                   timeout=1, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    subprocess.Popen(
+                        ["osascript", "-e", f'tell application "System Events" to set frontmost of every process whose unix id is {os.getpid()} to true'],
+                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+                    )
                 except Exception:
                     pass
             elif sys.platform.startswith("linux"):
@@ -6904,16 +6919,30 @@ class VoicePlayerApp:
                 status(f"установлена последняя версия ({APP_VERSION})")
 
     def _user_idle_s(self) -> float:
-        if not IS_WIN:
-            return float("inf")
-        class LASTINPUTINFO(ctypes.Structure):
-            _fields_ = [("cbSize", ctypes.c_uint), ("dwTime", ctypes.c_uint)]
-        info = LASTINPUTINFO(ctypes.sizeof(LASTINPUTINFO), 0)
-        if not ctypes.windll.user32.GetLastInputInfo(ctypes.byref(info)):
+        if IS_WIN:
+            class LASTINPUTINFO(ctypes.Structure):
+                _fields_ = [("cbSize", ctypes.c_uint), ("dwTime", ctypes.c_uint)]
+            info = LASTINPUTINFO(ctypes.sizeof(LASTINPUTINFO), 0)
+            if not ctypes.windll.user32.GetLastInputInfo(ctypes.byref(info)):
+                return 0.0
+            return ((ctypes.windll.kernel32.GetTickCount() - info.dwTime) & 0xFFFFFFFF) / 1000.0
+        if IS_MAC:
+            try:
+                out = subprocess.check_output(
+                    ["ioreg", "-c", "IOHIDSystem", "-d", "4"],
+                    text=True, timeout=1, stderr=subprocess.DEVNULL
+                )
+                m = re.search(r'"HIDIdleTime"\s*=\s*(\d+)', out)
+                if m:
+                    return int(m.group(1)) / 1_000_000_000.0
+            except Exception:
+                pass
             return 0.0
-        return ((ctypes.windll.kernel32.GetTickCount() - info.dwTime) & 0xFFFFFFFF) / 1000.0
+        return float("inf")
 
     def _can_restart_now(self) -> bool:
+        if getattr(sys, "frozen", False) and not IS_WIN:
+            return False
         return (not self.player.is_playing() and not self.player.is_paused()
                 and self.render_queue.empty() and self._trans_queue.empty()
                 and not self.tts_input.get("1.0", "end").strip()
@@ -6927,9 +6956,12 @@ class VoicePlayerApp:
             if (not self._update_ready and self._auto_update
                     and vp_updater.parse_version(on_disk) > vp_updater.parse_version(APP_VERSION)):
                 self._update_ready = on_disk
-            best = vp_updater.best_installed(vp_updater.parse_version(APP_VERSION))
-            if best and not self._update_ready:
-                self._update_ready = vp_updater.read_version(best)
+            if not getattr(sys, "frozen", False):
+                best = vp_updater.best_installed(vp_updater.parse_version(APP_VERSION))
+                if best and not self._update_ready:
+                    self._update_ready = vp_updater.read_version(best)
+            if self._update_ready and vp_updater.parse_version(self._update_ready) <= vp_updater.parse_version(APP_VERSION):
+                self._update_ready = ""
             if self._update_ready and not getattr(self, "_update_banner_shown", False):
                 self._show_update_banner(self._update_ready)
             if self._update_ready and self._auto_update and self._can_restart_now():
@@ -8646,6 +8678,12 @@ def main():
         root = tk.Tk()
         root.report_callback_exception = lambda t, v, tb: log_crash("tk-callback", t, v, tb)
         app = VoicePlayerApp(root)
+        if IS_MAC:
+            try:
+                root.createcommand("tk::mac::ReopenApplication", app._show_window)
+                root.createcommand("tk::mac::Quit", app.exit_app)
+            except Exception:
+                pass
         if "--background" in sys.argv:                  # обновились, пока окно было свёрнуто: не всплывать
             root.iconify()
         root.after(UPDATE_HEALTHY_S * 1000, lambda: vp_updater.mark_healthy(APP_DIR))

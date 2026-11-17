@@ -294,6 +294,8 @@ def _synthesize(text: str, rate: str, mp3_path: Path, voice: Optional[str] = Non
 
 
 def _audio_duration(path: Path, fallback: float) -> float:
+    if _miniaudio is None:
+        return fallback
     try:
         return float(_miniaudio.get_file_info(str(path)).duration)
     except Exception:

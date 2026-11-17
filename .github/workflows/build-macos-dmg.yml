@@ -104,10 +104,10 @@ jobs:
         run: |
           APP_DIR="${{ steps.rel.outputs.app_dir }}"
           cd "$APP_DIR"
-          # Verify binary starts without immediate Python import/crash (run for 3s then kill)
+          # Verify binary starts without immediate Python import/crash or 5s update-restart loop
           ./dist/VoicePlayer.app/Contents/MacOS/VoicePlayer &
           APP_PID=$!
-          sleep 3
+          sleep 8
           if ! kill -0 $APP_PID 2>/dev/null; then
             wait $APP_PID || true
             echo "ERROR: VoicePlayer.app exited prematurely during smoke test!"

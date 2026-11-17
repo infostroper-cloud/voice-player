@@ -13,6 +13,7 @@ import json
 import os
 import re
 import shutil
+import ssl
 import subprocess
 import sys
 import tempfile
@@ -218,13 +219,25 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 
+def _ssl_context():
+    try:
+        import certifi
+        return ssl.create_default_context(cafile=certifi.where())
+    except Exception:
+        return None
+
+
 def _get(url: str, token: str, accept: str, timeout: int = 30) -> bytes:
     """Ключ уходит только на api.github.com: файл отдаётся с другого адреса по перенаправлению.
     Для публичного репозитория релизов работает и без токена (token='')."""
     headers = {"Accept": accept, "User-Agent": "VoicePlayer-updater"}
     if token:
         headers["Authorization"] = f"Bearer {token}"
-    opener = urllib.request.build_opener(_NoRedirect)
+    ctx = _ssl_context()
+    handlers = [_NoRedirect()]
+    if ctx is not None:
+        handlers.append(urllib.request.HTTPSHandler(context=ctx))
+    opener = urllib.request.build_opener(*handlers)
     try:
         with opener.open(urllib.request.Request(url, headers=headers), timeout=timeout) as r:
             return r.read()
@@ -233,7 +246,7 @@ def _get(url: str, token: str, accept: str, timeout: int = 30) -> bytes:
         if not location:
             raise
     req = urllib.request.Request(location, headers={"User-Agent": "VoicePlayer-updater"})
-    with urllib.request.urlopen(req, timeout=max(timeout, 300)) as r:
+    with urllib.request.urlopen(req, timeout=max(timeout, 300), context=ctx) as r:
         return r.read()
 
 
@@ -346,6 +359,9 @@ def check_and_install(app_dir: Path, log=lambda _m: None) -> str:
         return ""
     assets = {a["name"]: a["url"] for a in rel.get("assets") or []}
     if getattr(sys, "frozen", False):
+        if os.name != "nt":
+            # Собранный macOS .app не может перезапуститься в ~/.voice-player/versions/<ver>/app.py
+            return ""
         exe_name = f"VoicePlayer-Setup-{version}.exe"
         if exe_name in assets:
             upd_dir = home_dir() / "updates"

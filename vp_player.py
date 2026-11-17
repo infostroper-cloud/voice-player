@@ -132,6 +132,13 @@ class MciPlayer:
 
 # ---- потоковый плеер с мгновенной регулировкой скорости (тон сохраняется) ----
 # Бэкенд: miniaudio (декод mp3) + audiotsm WSOLA (time-stretch) + sounddevice (вывод).
+_np = None
+_miniaudio = None
+_sd = None
+_wsola = None
+_ArrayReader = None
+_ArrayWriter = None
+_STREAM_IMPORT_ERR = ""
 try:
     import numpy as _np
     import miniaudio as _miniaudio
@@ -139,7 +146,7 @@ try:
     from audiotsm import wsola as _wsola
     from audiotsm.io.array import ArrayReader as _ArrayReader, ArrayWriter as _ArrayWriter
     _STREAM_OK = True
-except Exception as _e:  # библиотек нет — останемся на MCI
+except Exception as _e:  # библиотек нет — останемся на MCI / AfPlayer
     _STREAM_OK = False
     _STREAM_IMPORT_ERR = str(_e)
 
@@ -467,11 +474,12 @@ class StreamPlayer:
             return None
 
     def load_and_play(self, path, speed: float = 1.0):
+        target_sr = self._sr or self._PLAY_SR
         dec = _miniaudio.decode_file(
             str(path),
             output_format=_miniaudio.SampleFormat.FLOAT32,
             nchannels=self._PLAY_CH,
-            sample_rate=self._PLAY_SR,
+            sample_rate=target_sr,
         )
         pcm = _np.array(dec.samples, dtype=_np.float32).reshape(-1, dec.nchannels)
         speed = max(0.5, min(2.0, float(speed)))
@@ -486,8 +494,15 @@ class StreamPlayer:
             out0 = self._stretch(pcm[:head_end], speed, tsm=tsm, flush=(head_end >= total))
         with self._lock:
             # Переиспользуем ОДИН поток на всю сессию (формат унифицирован до 24 kHz mono):
-            # пересоздаём только если формат изменился — иначе просто подменяем буфер.
-            need_new = (self._stream is None or self._sr != dec.sample_rate or self._ch != dec.nchannels)
+            # пересоздаём только если формат изменился или поток неактивен (сон/смена устройства CoreAudio).
+            st_active = False
+            if self._stream is not None:
+                try:
+                    st_active = bool(self._stream.active)
+                except Exception:
+                    st_active = False
+            need_new = (self._stream is None or not st_active
+                        or self._sr != dec.sample_rate or self._ch != dec.nchannels)
             self._src = pcm; self._sr = dec.sample_rate; self._ch = dec.nchannels
             self._speed = speed; self._target_speed = speed
             self._out = out0; self._out_pos = 0; self._seg_src_start = 0
@@ -496,8 +511,49 @@ class StreamPlayer:
             self._seek_req = None
             self._finished = False; self._paused = False; self._has = True
             self._gen += 1
-            if need_new:
-                self._open_stream()
+            cur_gen = self._gen
+        if need_new:
+            try:
+                self._open_stream(dec.sample_rate, dec.nchannels)
+            except Exception as e:
+                # На macOS CoreAudio (Bluetooth/внешние ЦАПы) иногда не принимает 24000 Hz:
+                # пробуем default_samplerate устройства вывода и передекодируем.
+                fallback_sr = None
+                try:
+                    dev_info = _sd.query_devices(kind="output")
+                    dsr = int(dev_info.get("default_samplerate") or 0)
+                    if dsr > 0 and dsr != dec.sample_rate:
+                        fallback_sr = dsr
+                except Exception:
+                    pass
+                if not fallback_sr:
+                    log_line(f"StreamPlayer open error: {e}")
+                    raise
+                dec2 = _miniaudio.decode_file(
+                    str(path),
+                    output_format=_miniaudio.SampleFormat.FLOAT32,
+                    nchannels=self._PLAY_CH,
+                    sample_rate=fallback_sr,
+                )
+                pcm2 = _np.array(dec2.samples, dtype=_np.float32).reshape(-1, dec2.nchannels)
+                total2 = pcm2.shape[0]
+                if abs(speed - 1.0) < 1e-3:
+                    head_end2 = total2
+                    tsm2 = None
+                    out2 = pcm2.copy()
+                else:
+                    head_end2 = min(total2, dec2.sample_rate * self._HEAD_STRETCH_S)
+                    tsm2 = _wsola(channels=dec2.nchannels, speed=speed)
+                    out2 = self._stretch(pcm2[:head_end2], speed, tsm=tsm2, flush=(head_end2 >= total2))
+                with self._lock:
+                    if self._gen != cur_gen:
+                        return
+                    self._src = pcm2; self._sr = dec2.sample_rate; self._ch = dec2.nchannels
+                    self._out = out2; self._out_pos = 0; self._seg_src_start = 0
+                    self._stretched_up_to = head_end2
+                    self._tsm = (None if head_end2 >= total2 else tsm2)
+                    head_end, total = head_end2, total2
+                self._open_stream(dec2.sample_rate, dec2.nchannels)
         if head_end < total:
             self._speed_evt.set()
 
@@ -538,9 +594,12 @@ class StreamPlayer:
                 self._speed_evt.set()
             return True
 
-    def _open_stream(self):
+    def _open_stream(self, sr: int = None, ch: int = None):
         self._close_stream()
-        st = _sd.OutputStream(samplerate=self._sr, channels=self._ch,
+        with self._lock:
+            sr = sr or self._sr
+            ch = ch or self._ch
+        st = _sd.OutputStream(samplerate=sr, channels=ch,
                               dtype="float32", callback=self._callback)
         st.start()
         with self._lock:
@@ -570,13 +629,15 @@ class StreamPlayer:
                 self._paused = False
 
     def stop(self):
-        # Останавливаем воспроизведение, но поток НЕ закрываем (переиспользуем) —
-        # колбэк просто выдаёт тишину. Закрываем поток только в shutdown().
+        # На macOS закрываем аудиопоток при остановке, чтобы CoreAudio не держал устройство
+        # и не протухал при сне/переключении AirPods; на Windows переиспользуем поток.
         with self._lock:
             self._src = None; self._out = None; self._tsm = None
             self._stretched_up_to = 0; self._seek_req = None
             self._has = False; self._paused = False
             self._finished = False; self._out_pos = 0
+        if sys.platform == "darwin":
+            self._close_stream()
 
     def is_playing(self) -> bool:
         with self._lock:

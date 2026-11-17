@@ -21,8 +21,13 @@ echo "Detected platform: $PLATFORM"
 PY_BIN=""
 if [ "$PLATFORM" = "macOS" ]; then
     MAC_CANDIDATES=(
+        "/opt/homebrew/bin/python3.13"
+        "/opt/homebrew/bin/python3.12"
+        "/opt/homebrew/bin/python3.11"
         "/opt/homebrew/bin/python3"
+        "/usr/local/bin/python3.12"
         "/usr/local/bin/python3"
+        "/Library/Frameworks/Python.framework/Versions/3.14/bin/python3"
         "/Library/Frameworks/Python.framework/Versions/3.13/bin/python3"
         "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3"
         "/Library/Frameworks/Python.framework/Versions/3.11/bin/python3"
@@ -33,14 +38,31 @@ if [ "$PLATFORM" = "macOS" ]; then
     )
     for cand in "${MAC_CANDIDATES[@]}"; do
         if [ -n "$cand" ] && [ -x "$cand" ]; then
-            if "$cand" -c "import tkinter as tk; r = tk.Tk(); r.withdraw(); r.destroy()" >/dev/null 2>&1; then
+            if "$cand" -c "import sys, tkinter as tk; assert sys.version_info >= (3, 10); r = tk.Tk(); r.withdraw(); r.destroy()" >/dev/null 2>&1; then
                 PY_BIN="$cand"
                 break
-            elif [ -z "$PY_BIN" ]; then
-                PY_BIN="$cand"
             fi
         fi
     done
+    if [ -z "$PY_BIN" ] && command -v brew >/dev/null 2>&1; then
+        echo "🔧 Homebrew detected. Installing Python 3.12 + Tkinter..."
+        HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_INSTALL_CLEANUP=1 brew install python@3.12 python-tk@3.12 || true
+        for cand in "/opt/homebrew/bin/python3.12" "/usr/local/bin/python3.12" "/opt/homebrew/opt/python@3.12/bin/python3.12"; do
+            if [ -x "$cand" ]; then PY_BIN="$cand"; break; fi
+        done
+    fi
+    if [ -z "$PY_BIN" ]; then
+        for cand in "${MAC_CANDIDATES[@]}"; do
+            if [ -n "$cand" ] && [ -x "$cand" ]; then
+                if "$cand" -c "import tkinter as tk; r = tk.Tk(); r.withdraw(); r.destroy()" >/dev/null 2>&1; then
+                    PY_BIN="$cand"
+                    break
+                elif [ -z "$PY_BIN" ]; then
+                    PY_BIN="$cand"
+                fi
+            fi
+        done
+    fi
 fi
 
 if [ -z "$PY_BIN" ]; then
@@ -86,14 +108,34 @@ mkdir -p "$VERSIONS_DIR"
 
 REQUESTED_VER="${1:-}"
 DETECTED_VER=""
+API_DL_URL=""
 if [ -n "$REQUESTED_VER" ]; then
     DETECTED_VER="$REQUESTED_VER"
 else
-    if command -v curl >/dev/null 2>&1; then
-        DETECTED_VER=$(curl -fsSL https://api.github.com/repos/infostroper-cloud/voice-player/releases/latest 2>/dev/null | grep -m 1 '"tag_name":' | sed -E 's/.*"tag_name":\s*"v?([^"]+)".*/\1/' || true)
-    fi
+    REL_INFO=$($PY_BIN -c '
+import json, urllib.request
+try:
+    req = urllib.request.Request(
+        "https://api.github.com/repos/infostroper-cloud/voice-player/releases/latest",
+        headers={"User-Agent": "VoicePlayer-Installer"}
+    )
+    with urllib.request.urlopen(req, timeout=10) as r:
+        d = json.loads(r.read().decode())
+    tag = (d.get("tag_name") or "").replace("voice-player-v", "").lstrip("v")
+    url = ""
+    for a in d.get("assets") or []:
+        n = a.get("name", "")
+        if n.endswith(".tar.gz") or n.endswith(".zip"):
+            url = a.get("browser_download_url", "")
+            break
+    print(tag + "|" + url)
+except Exception:
+    print("|")
+' 2>/dev/null || echo "|")
+    DETECTED_VER="${REL_INFO%%|*}"
+    API_DL_URL="${REL_INFO#*|}"
     if [ -z "$DETECTED_VER" ]; then
-        DETECTED_VER="1.2.5"
+        DETECTED_VER="1.2.24"
     fi
 fi
 
@@ -102,11 +144,14 @@ echo "Downloading VoicePlayer v$DETECTED_VER for $PLATFORM..."
 TMP_DIR="/tmp/vp-install-$$"
 mkdir -p "$TMP_DIR/extract"
 
-CANDIDATE_URLS=(
+CANDIDATE_URLS=()
+if [ -n "$API_DL_URL" ]; then
+    CANDIDATE_URLS+=("$API_DL_URL")
+fi
+CANDIDATE_URLS+=(
+    "https://github.com/infostroper-cloud/voice-player/releases/download/voice-player-v${DETECTED_VER}/voice-player-${DETECTED_VER}.zip"
     "https://github.com/infostroper-cloud/voice-player/releases/latest/download/VoicePlayer-${DETECTED_VER}-macos-linux.tar.gz"
     "https://github.com/infostroper-cloud/voice-player/releases/latest/download/voice-player-${DETECTED_VER}.zip"
-    "https://github.com/infostroper-cloud/voice-player/releases/latest/download/voice-player.zip"
-    "https://github.com/infostroper-cloud/voice-player/archive/refs/tags/v${DETECTED_VER}.tar.gz"
     "https://github.com/infostroper-cloud/voice-player/archive/refs/heads/main.zip"
 )
 
@@ -189,14 +234,38 @@ cat << EOF > "$INSTALL_DIR/current-version.json"
 {"version": "$DETECTED_VER"}
 EOF
 
-# Install python dependencies in user mode
+# Install python dependencies (prefer isolated venv on macOS/Linux)
 echo "Installing Python dependencies (sounddevice, edge-tts, piper-tts, etc.)..."
+if [ -d "$INSTALL_DIR/venv" ]; then
+    if ! "$INSTALL_DIR/venv/bin/python" -c "import sys, tkinter as tk; assert sys.version_info >= (3, 10); r = tk.Tk(); r.withdraw(); r.destroy()" >/dev/null 2>&1; then
+        echo "Recreating outdated/broken venv with $PY_BIN..."
+        rm -rf "$INSTALL_DIR/venv"
+    fi
+fi
+if [ ! -d "$INSTALL_DIR/venv" ]; then
+    $PY_BIN -m venv "$INSTALL_DIR/venv" 2>/dev/null || true
+fi
+if [ -x "$INSTALL_DIR/venv/bin/python" ]; then
+    PY_BIN="$INSTALL_DIR/venv/bin/python"
+    $PY_BIN -m pip install --upgrade pip --quiet 2>/dev/null || true
+fi
+PIP_OK=0
 if [ -f "$TARGET_DIR/requirements.txt" ]; then
-    $PY_BIN -m pip install --user --quiet -r "$TARGET_DIR/requirements.txt" || \
-    $PY_BIN -m pip install --quiet -r "$TARGET_DIR/requirements.txt" || true
-else
-    echo "Installing core dependencies directly..."
-    $PY_BIN -m pip install --user --quiet sounddevice numpy edge-tts miniaudio pillow lameenc audiotsm || true
+    if $PY_BIN -m pip install --quiet -r "$TARGET_DIR/requirements.txt" 2>/dev/null; then
+        PIP_OK=1
+    elif $PY_BIN -m pip install --user --quiet -r "$TARGET_DIR/requirements.txt" 2>/dev/null; then
+        PIP_OK=1
+    elif $PY_BIN -m pip install --break-system-packages --quiet -r "$TARGET_DIR/requirements.txt" 2>/dev/null; then
+        PIP_OK=1
+    fi
+fi
+if [ "$PIP_OK" -ne 1 ]; then
+    echo "Installing compatible core dependencies..."
+    for pkg in sounddevice numpy edge-tts miniaudio pillow lameenc audiotsm certifi aiohttp zstandard piper-tts ruaccent huggingface_hub pypdf "onnxruntime>=1.16.0"; do
+        $PY_BIN -m pip install --quiet "$pkg" 2>/dev/null || \
+        $PY_BIN -m pip install --user --quiet "$pkg" 2>/dev/null || \
+        $PY_BIN -m pip install --break-system-packages --quiet "$pkg" 2>/dev/null || true
+    done
 fi
 
 # Launcher script
@@ -205,8 +274,8 @@ LOCAL_LAUNCHER="$HOME/.local/bin/voiceplayer"
 
 cat << EOF > "$LOCAL_LAUNCHER"
 #!/usr/bin/env bash
-LATEST=\$(ls -d "\$HOME/.voice-player/versions/"[0-9]* 2>/dev/null | sort -V | tail -n 1)
-RUN_DIR="\${LATEST:-\$TARGET_DIR}"
+LATEST=\$(ls -d "\$HOME/.voice-player/versions/"[0-9]* 2>/dev/null | sort -t. -k1,1n -k2,2n -k3,3n | tail -n 1)
+RUN_DIR="\${LATEST:-$TARGET_DIR}"
 cd "\$RUN_DIR"
 exec "$PY_BIN" "\$RUN_DIR/app.py" "\$@"
 EOF
@@ -251,8 +320,8 @@ if [ "$PLATFORM" = "macOS" ]; then
     cat << EOF > "$MAC_APP/Contents/MacOS/VoicePlayer"
 #!/usr/bin/env bash
 export TK_SILENCE_DEPRECATION=1
-LATEST=\$(ls -d "\$HOME/.voice-player/versions/"[0-9]* 2>/dev/null | sort -V | tail -n 1)
-RUN_DIR="\${LATEST:-\$TARGET_DIR}"
+LATEST=\$(ls -d "\$HOME/.voice-player/versions/"[0-9]* 2>/dev/null | sort -t. -k1,1n -k2,2n -k3,3n | tail -n 1)
+RUN_DIR="\${LATEST:-$TARGET_DIR}"
 cd "\$RUN_DIR"
 exec "$PY_BIN" "\$RUN_DIR/app.py" "\$@"
 EOF
@@ -289,6 +358,17 @@ EOF
 
     if [ -f "$TARGET_DIR/icon.png" ]; then
         cp "$TARGET_DIR/icon.png" "$MAC_APP/Contents/Resources/icon.png" 2>/dev/null || true
+        if command -v sips >/dev/null 2>&1 && command -v iconutil >/dev/null 2>&1; then
+            ICONSET_TMP="/tmp/vp-iconset-$$.iconset"
+            mkdir -p "$ICONSET_TMP"
+            for sz in 16 32 128 256 512; do
+                sips -z $sz $sz "$TARGET_DIR/icon.png" --out "$ICONSET_TMP/icon_${sz}x${sz}.png" >/dev/null 2>&1 || true
+                dbl=$((sz * 2))
+                sips -z $dbl $dbl "$TARGET_DIR/icon.png" --out "$ICONSET_TMP/icon_${sz}x${sz}@2x.png" >/dev/null 2>&1 || true
+            done
+            iconutil -c icns "$ICONSET_TMP" -o "$MAC_APP/Contents/Resources/icon.icns" 2>/dev/null || true
+            rm -rf "$ICONSET_TMP"
+        fi
     fi
 
     # Также сохраняем быстрый командный файл в $HOME/Applications
@@ -298,8 +378,8 @@ EOF
     cat << EOF > "$MAC_LAUNCHER"
 #!/usr/bin/env bash
 export TK_SILENCE_DEPRECATION=1
-LATEST=\$(ls -d "\$HOME/.voice-player/versions/"[0-9]* 2>/dev/null | sort -V | tail -n 1)
-RUN_DIR="\${LATEST:-\$TARGET_DIR}"
+LATEST=\$(ls -d "\$HOME/.voice-player/versions/"[0-9]* 2>/dev/null | sort -t. -k1,1n -k2,2n -k3,3n | tail -n 1)
+RUN_DIR="\${LATEST:-$TARGET_DIR}"
 cd "\$RUN_DIR"
 exec "$PY_BIN" "\$RUN_DIR/app.py" "\$@"
 EOF

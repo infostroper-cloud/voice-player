@@ -236,6 +236,12 @@ EOF
 
 # Install python dependencies (prefer isolated venv on macOS/Linux)
 echo "Installing Python dependencies (sounddevice, edge-tts, piper-tts, etc.)..."
+if [ -d "$INSTALL_DIR/venv" ]; then
+    if ! "$INSTALL_DIR/venv/bin/python" -c "import sys, tkinter as tk; assert sys.version_info >= (3, 10); r = tk.Tk(); r.withdraw(); r.destroy()" >/dev/null 2>&1; then
+        echo "Recreating outdated/broken venv with $PY_BIN..."
+        rm -rf "$INSTALL_DIR/venv"
+    fi
+fi
 if [ ! -d "$INSTALL_DIR/venv" ]; then
     $PY_BIN -m venv "$INSTALL_DIR/venv" 2>/dev/null || true
 fi
@@ -269,7 +275,7 @@ LOCAL_LAUNCHER="$HOME/.local/bin/voiceplayer"
 cat << EOF > "$LOCAL_LAUNCHER"
 #!/usr/bin/env bash
 LATEST=\$(ls -d "\$HOME/.voice-player/versions/"[0-9]* 2>/dev/null | sort -t. -k1,1n -k2,2n -k3,3n | tail -n 1)
-RUN_DIR="\${LATEST:-\$TARGET_DIR}"
+RUN_DIR="\${LATEST:-$TARGET_DIR}"
 cd "\$RUN_DIR"
 exec "$PY_BIN" "\$RUN_DIR/app.py" "\$@"
 EOF
@@ -315,7 +321,7 @@ if [ "$PLATFORM" = "macOS" ]; then
 #!/usr/bin/env bash
 export TK_SILENCE_DEPRECATION=1
 LATEST=\$(ls -d "\$HOME/.voice-player/versions/"[0-9]* 2>/dev/null | sort -t. -k1,1n -k2,2n -k3,3n | tail -n 1)
-RUN_DIR="\${LATEST:-\$TARGET_DIR}"
+RUN_DIR="\${LATEST:-$TARGET_DIR}"
 cd "\$RUN_DIR"
 exec "$PY_BIN" "\$RUN_DIR/app.py" "\$@"
 EOF
@@ -352,6 +358,17 @@ EOF
 
     if [ -f "$TARGET_DIR/icon.png" ]; then
         cp "$TARGET_DIR/icon.png" "$MAC_APP/Contents/Resources/icon.png" 2>/dev/null || true
+        if command -v sips >/dev/null 2>&1 && command -v iconutil >/dev/null 2>&1; then
+            ICONSET_TMP="/tmp/vp-iconset-$$.iconset"
+            mkdir -p "$ICONSET_TMP"
+            for sz in 16 32 128 256 512; do
+                sips -z $sz $sz "$TARGET_DIR/icon.png" --out "$ICONSET_TMP/icon_${sz}x${sz}.png" >/dev/null 2>&1 || true
+                dbl=$((sz * 2))
+                sips -z $dbl $dbl "$TARGET_DIR/icon.png" --out "$ICONSET_TMP/icon_${sz}x${sz}@2x.png" >/dev/null 2>&1 || true
+            done
+            iconutil -c icns "$ICONSET_TMP" -o "$MAC_APP/Contents/Resources/icon.icns" 2>/dev/null || true
+            rm -rf "$ICONSET_TMP"
+        fi
     fi
 
     # Также сохраняем быстрый командный файл в $HOME/Applications
@@ -362,7 +379,7 @@ EOF
 #!/usr/bin/env bash
 export TK_SILENCE_DEPRECATION=1
 LATEST=\$(ls -d "\$HOME/.voice-player/versions/"[0-9]* 2>/dev/null | sort -t. -k1,1n -k2,2n -k3,3n | tail -n 1)
-RUN_DIR="\${LATEST:-\$TARGET_DIR}"
+RUN_DIR="\${LATEST:-$TARGET_DIR}"
 cd "\$RUN_DIR"
 exec "$PY_BIN" "\$RUN_DIR/app.py" "\$@"
 EOF

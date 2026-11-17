@@ -1,5 +1,7 @@
 """Подготовка и нормализация текста для озвучки, извлечение документов и разбиение на части."""
 
+from __future__ import annotations
+
 import html
 import re
 import zipfile
