@@ -3857,6 +3857,77 @@ class VoicePlayerApp:
         txt.bind("<Control-KeyPress>", self._input_ctrl)   # Ctrl+A/C/V/X/Z (любая раскладка)
         txt.focus_set()
 
+    def _word_at_text_event(self, event) -> str:
+        """Вернуть выделенный фрагмент или слово под курсором в text_widget."""
+        try:
+            sel = self.text_widget.get("sel.first", "sel.last").strip()
+            if sel and "\n" not in sel and len(sel) <= 60:
+                return sel
+        except Exception:
+            pass
+        try:
+            idx = self.text_widget.index(f"@{event.x},{event.y}")
+            raw = self.text_widget.get(f"{idx} wordstart", f"{idx} wordend").strip()
+            return raw.strip(".,!?;:\"'()[]{}«»„“—–-")
+        except Exception:
+            return ""
+
+    def _pronounce_word_dialog(self, word: str):
+        """Быстрый диалог добавления/правки произношения слова по ПКМ."""
+        c = self.colors
+        win = tk.Toplevel(self.root, bg=c["bg"])
+        win.title("Исправить произношение")
+        win.transient(self.root)
+        self._center_over_root(win, 400, 210)
+        win.resizable(False, False)
+
+        frm = ttk.Frame(win, padding=14)
+        frm.pack(fill="both", expand=True)
+        frm.columnconfigure(1, weight=1)
+
+        ttk.Label(frm, text="Слово:").grid(row=0, column=0, sticky="w", pady=(0, 8))
+        var_k = tk.StringVar(value=word)
+        ent_k = ttk.Entry(frm, textvariable=var_k)
+        ent_k.grid(row=0, column=1, sticky="ew", padx=(8, 0), pady=(0, 8))
+
+        existing = next((v for k, v in _PRONOUNCE.items() if k.lower() == word.lower()), "")
+        ttk.Label(frm, text="Как читать:").grid(row=1, column=0, sticky="w", pady=(0, 8))
+        var_v = tk.StringVar(value=existing)
+        ent_v = ttk.Entry(frm, textvariable=var_v)
+        ent_v.grid(row=1, column=1, sticky="ew", padx=(8, 0), pady=(0, 8))
+
+        var_rerender = tk.BooleanVar(value=True)
+        ttk.Checkbutton(frm, text="Переозвучить текущую реплику сразу",
+                        variable=var_rerender).grid(row=2, column=0, columnspan=2, sticky="w", pady=(0, 10))
+
+        def save(_evt=None):
+            k = var_k.get().strip()
+            v = var_v.get().strip()
+            if not k:
+                win.destroy(); return
+            if v:
+                _PRONOUNCE[k] = v
+                msg = f"произношение «{k}» → «{v}» сохранено"
+            else:
+                _PRONOUNCE.pop(k, None)
+                msg = f"правило «{k}» удалено"
+            self._save_pronounce()
+            win.destroy()
+            if var_rerender.get() and 0 <= self.current_idx < len(self.queue_items):
+                self._retry_render(self.queue_items[self.current_idx])
+            self._set_status(msg, ok=True)
+
+        btns = ttk.Frame(frm)
+        btns.grid(row=3, column=0, columnspan=2, sticky="ew")
+        ttk.Button(btns, text="Сохранить", style="Primary.TButton", command=save).pack(side="left")
+        ttk.Button(btns, text="Отмена", command=win.destroy).pack(side="right")
+
+        ent_v.bind("<Return>", save)
+        ent_k.bind("<Return>", save)
+        win.bind("<Escape>", lambda _e: win.destroy())
+        ent_v.focus_set()
+        ent_v.selection_range(0, "end")
+
     # ------------------ архив (поиск/повторное открытие) ------------------
     def _open_archive(self):
         c = self.colors
@@ -4974,6 +5045,11 @@ class VoicePlayerApp:
             menu.add_command(label="Вырезать", command=lambda: self.text_widget.event_generate("<<Cut>>"))
             menu.add_command(label="Вставить", command=lambda: self.text_widget.event_generate("<<Paste>>"))
         menu.add_command(label="Выделить всё", command=self._text_panel_select_all)
+        word = self._word_at_text_event(event)
+        if word:
+            menu.add_separator()
+            lbl = f"🗣 Исправить произношение «{word[:22]}»…"
+            menu.add_command(label=lbl, command=lambda w=word: self._pronounce_word_dialog(w))
         try: menu.tk_popup(event.x_root, event.y_root)
         finally: menu.grab_release()
         return "break"
