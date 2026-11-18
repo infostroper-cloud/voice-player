@@ -498,3 +498,45 @@ def _split_for_tts(
         else:
             out.append((a, n))
     return out
+
+
+_BRIEF_KEYWORDS = (
+    "готов", "ошиб", "error", "fail", "passed", "итог", "результат",
+    "следующ", "вывод", "warning", "blocked", "успеш", "исправ",
+    "добав", "запуш", "тест", "причин", "решен",
+)
+
+
+def brief_text(text: str, max_sentences: int = 5, max_chars: int = 650) -> str:
+    """Сжать длинный ответ агента локально: оставить вводную, ключевые итоги/ошибки и финал."""
+    t = (text or "").strip()
+    if len(t) <= 420:
+        return t
+    sents = [s.strip() for s in re.split(r"(?<=[.!?…])\s+|\n+", t) if s.strip()]
+    if len(sents) <= 4:
+        return t
+
+    picked = {0, len(sents) - 1}
+    scored = []
+    for idx in range(1, len(sents) - 1):
+        s = sents[idx]
+        low = s.lower()
+        score = sum(2 for kw in _BRIEF_KEYWORDS if kw in low)
+        if 20 <= len(s) <= 180:
+            score += 1
+        if "путь к файлу" in low or s.count("•") > 2:
+            score -= 2
+        scored.append((score, -len(s), idx))
+
+    scored.sort(reverse=True)
+    total_len = len(sents[0]) + len(sents[-1]) + 2
+    for _, _, idx in scored:
+        if len(picked) >= max_sentences:
+            break
+        cand_len = len(sents[idx]) + 1
+        if total_len + cand_len > max_chars:
+            continue
+        picked.add(idx)
+        total_len += cand_len
+
+    return "\n".join(sents[i] for i in sorted(picked))

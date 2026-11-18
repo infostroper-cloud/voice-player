@@ -37,6 +37,25 @@ class TestPronunciationV2(unittest.TestCase):
         self.assertIn("пи кей си и", out)
         self.assertIn("ребейз", out)
 
+    def test_brief_text_keeps_outcome_and_short_text_unchanged(self):
+        short = "Короткий ответ: всё работает."
+        self.assertEqual(vp_text.brief_text(short), short)
+        long_msg = (
+            "Начинаю проверку проекта и всех зависимостей в репозитории. "
+            "Просмотрен первый промежуточный каталог с временными артефактами и логами. "
+            "Просмотрен второй промежуточный каталог с резервными файлами и кэшем. "
+            "Просмотрен третий промежуточный каталог со старыми логами и сборками. "
+            "Просмотрен четвёртый промежуточный каталог для анализа структуры модулей. "
+            "Просмотрен пятый промежуточный каталог с конфигурациями и тестами. "
+            "Итог: все 87 тестов пройдены успешно, ошибка рендера исправлена. "
+            "Следующий шаг: перезапустите плеер."
+        )
+        b = vp_text.brief_text(long_msg, max_sentences=4, max_chars=450)
+        self.assertLess(len(b), len(long_msg))
+        self.assertIn("Начинаю проверку", b)
+        self.assertIn("87 тестов пройдены успешно", b)
+        self.assertIn("перезапустите плеер", b)
+
 
 if __name__ == "__main__":
     unittest.main()

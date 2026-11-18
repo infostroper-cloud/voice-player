@@ -405,6 +405,7 @@ def render_audio_blocking(
     *,
     audio_dir: Optional[Path] = None,
     synthesize_fn=None,
+    brief: bool = False,
 ) -> None:
     """Озвучить реплику. Длинную — частями: каждая часть короткая и не упирается в таймаут,
     on_part вызывается по порядку, как только готова очередная часть (можно играть, не дожидаясь
@@ -416,6 +417,8 @@ def render_audio_blocking(
     target_audio_dir = Path(audio_dir) if audio_dir is not None else AUDIO_DIR
 
     body = _clean_for_tts(item.text)
+    if brief and len(body) > 420:
+        body = vp_text.brief_text(body)
     if not body or not any(ch.isalnum() for ch in body):
         item.audio_error = "пустой текст"
         log_line(f"render skip [{item.id}]: empty text")

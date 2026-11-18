@@ -572,11 +572,11 @@ vp_tts.configure(
 
 
 def render_audio_blocking(item: Item, rate: str = TTS_RATE, voice: str = TTS_VOICE,
-                          lead: str = "", on_part=None, should_yield=None) -> None:
+                          lead: str = "", on_part=None, should_yield=None, brief: bool = False) -> None:
     """Обёртка над vp_tts.render_audio_blocking (сохраняет совместимость с патчами app.AUDIO_DIR / app._synthesize)."""
     return vp_tts.render_audio_blocking(
         item, rate=rate, voice=voice, lead=lead, on_part=on_part, should_yield=should_yield,
-        audio_dir=AUDIO_DIR, synthesize_fn=_synthesize,
+        audio_dir=AUDIO_DIR, synthesize_fn=_synthesize, brief=brief,
     )
 
 
@@ -769,6 +769,8 @@ class VoicePlayerApp:
         self.var_source_label = tk.StringVar(
             value=self._src_labels.get(self.var_source.get(), "Все источники"))
         self.var_autoplay = tk.BooleanVar(value=self.prefs.get("autoplay", True))
+        self.var_brief_mode = tk.BooleanVar(value=bool(self.prefs.get("brief_mode", False)))
+        self._brief_mode_on = self.var_brief_mode.get()
         # «не беспокоить» + тихие часы: новые реплики копятся и рендерятся, но не озвучиваются сами
         self.var_dnd      = tk.BooleanVar(value=self.prefs.get("dnd", False))
         self.var_quiet    = tk.BooleanVar(value=self.prefs.get("quiet_hours", False))
@@ -1149,6 +1151,7 @@ class VoicePlayerApp:
                 "volume":   self.var_volume.get(),
                 "source":   self.var_source.get(),
                 "autoplay": self.var_autoplay.get(),
+                "brief_mode": self.var_brief_mode.get(),
                 "dnd": self.var_dnd.get(),
                 "quiet_hours": self.var_quiet.get(),
                 "quiet_from": self._quiet_from,
@@ -2309,7 +2312,14 @@ class VoicePlayerApp:
                           "Поиск по очереди (Ctrl+F)").pack(side="left", padx=(0, 3))
         self._tt(ttk.Button(actions_grp, text="▾", width=2, style="Toggle.TButton",
                             command=self._toggle_extra_filters),
-                 "Фильтр по автору и дате").pack(side="left")
+                 "Фильтр по автору и дате").pack(side="left", padx=(0, 3))
+        self.btn_brief = ttk.Button(
+            actions_grp, text="⚡ Суть",
+            style="Primary.TButton" if self._brief_mode_on else "Toggle.TButton",
+            command=self._toggle_brief_mode,
+        )
+        self.btn_brief.pack(side="left")
+        self._tt(self.btn_brief, "Режим «Только суть»: сокращает длинные ответы агентов до вывода и ключевых строк")
 
         # Скрываемая панель «Автор + Дата + Поиск» (раскрывается по 🔍 или ▾)
         sub_bars = ttk.Frame(mid)
@@ -2740,6 +2750,18 @@ class VoicePlayerApp:
                 b.configure(style=("PillActive.TButton" if active else "Toggle.TButton"))
             except Exception:
                 pass
+
+    def _toggle_brief_mode(self):
+        on = not self.var_brief_mode.get()
+        self.var_brief_mode.set(on)
+        self._brief_mode_on = on
+        self.btn_brief.configure(style="Primary.TButton" if on else "Toggle.TButton")
+        self._save_prefs()
+        if 0 <= self.current_idx < len(self.queue_items):
+            cur = self.queue_items[self.current_idx]
+            if cur.source in AI_SOURCES and not cur.played and len(cur.text or "") > 420:
+                self._retry_render(cur)
+        self._set_status("режим «Только суть» " + ("включён" if on else "выключен"), ok=True)
 
     def _toggle_extra_filters(self):
         if not hasattr(self, "filt_frame"):
@@ -5631,7 +5653,8 @@ class VoicePlayerApp:
             try:
                 render_audio_blocking(item, voice=voice, lead=lead,
                                       on_part=self._on_part_ready if streaming else None,
-                                      should_yield=_should_yield)
+                                      should_yield=_should_yield,
+                                      brief=(self._brief_mode_on and item.source in AI_SOURCES))
             finally:
                 if self._rendering_item_id == item.id:
                     self._rendering_item_id = None
