@@ -16,7 +16,7 @@ import vp_i18n
 import vp_kokoro
 import vp_piper
 from vp_player import _miniaudio
-from vp_text import _clean_for_tts, _derive_word_marks, _map_marks_to_chars, _split_for_tts
+from vp_text import _clean_for_tts, _derive_word_marks, _map_marks_to_chars, _split_for_tts, brief_text
 
 if TYPE_CHECKING:
     from app import Item
@@ -418,7 +418,7 @@ def render_audio_blocking(
 
     body = _clean_for_tts(item.text)
     if brief and len(body) > 420:
-        body = vp_text.brief_text(body)
+        body = brief_text(body)
     if not body or not any(ch.isalnum() for ch in body):
         item.audio_error = "пустой текст"
         log_line(f"render skip [{item.id}]: empty text")

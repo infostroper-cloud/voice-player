@@ -1,7 +1,9 @@
 # -*- coding: utf-8 -*-
 import sys
+import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -9,6 +11,7 @@ if str(ROOT) not in sys.path:
 
 import vp_piper
 import vp_text
+import vp_tts
 
 
 class TestPronunciationV2(unittest.TestCase):
@@ -55,6 +58,28 @@ class TestPronunciationV2(unittest.TestCase):
         self.assertIn("Начинаю проверку", b)
         self.assertIn("87 тестов пройдены успешно", b)
         self.assertIn("перезапустите плеер", b)
+
+    def test_render_audio_blocking_brief_mode(self):
+        long_msg = "Первое предложение. " + ("Промежуточная строка с деталями. " * 20) + "Итог: готово."
+        captured = []
+
+        def fake_synth(text, rate, mp3_path, voice):
+            captured.append(text)
+            Path(mp3_path).write_bytes(b"ID3test")
+            return []
+
+        item = SimpleNamespace(
+            id="brief-test", text=long_msg, parts_done=[], parts_fed=0,
+            audio_path=None, audio_ready=False, audio_error="", more_parts=False,
+            marks=[], rendered_voice="", deleted=False, source="codex",
+        )
+        with tempfile.TemporaryDirectory() as td:
+            vp_tts.render_audio_blocking(
+                item, voice="en-US-BrianMultilingualNeural",
+                audio_dir=Path(td), synthesize_fn=fake_synth, brief=True,
+            )
+        self.assertTrue(captured)
+        self.assertLess(len(captured[0]), len(long_msg))
 
 
 if __name__ == "__main__":
