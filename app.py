@@ -4633,58 +4633,63 @@ class VoicePlayerApp:
     def _draw_wave_slider_strip(self, canvas: tk.Canvas, w: int, h: int, phase: float,
                                 bg_col: str, hairline_col: str, signal_col: str,
                                 *, active: bool = True, x_start: int = 0):
-        """Волнообразная анимация-ползунок вдоль длины трека во время рендера."""
+        """Плавная двухслойная волна-ползунок с бегущим гребнем во время рендера."""
         import math
         if w - x_start <= 8:
             return
         span = w - x_start
         yc = h / 2.0
-        # Базовая тонкая подложка по всей длине
-        canvas.create_line(x_start + 2, yc, w - 2, yc, fill=hairline_col, width=max(1, h // 3), capstyle="round")
-        # Плавное возвратно-поступательное скольжение гребня волны вдоль трека (0.08 .. 0.92)
-        crest = 0.5 + 0.42 * math.sin(phase * 1.65)
-        sigma = 0.24 if active else 0.18
-        sig_mid = self._shade(signal_col, -0.25)
-        sig_dim = self._shade(signal_col, -0.48)
-        # Вертикальные микро-столбики волны + плавная синусоида по длине трека
-        step = 4 if h <= 6 else 3
-        pts = []
-        max_amp = max(1.6, (h - 1.5) * 0.48)
+        # Тонкая базовая направляющая
+        canvas.create_line(x_start + 2, yc, w - 2, yc, fill=hairline_col, width=1, capstyle="round")
+        crest = 0.5 + 0.42 * math.sin(phase * 1.45)
+        sigma = 0.22 if active else 0.16
+        sig_mid = self._shade(signal_col, -0.22)
+        sig_dim = self._shade(signal_col, -0.45)
+        step = 3 if h <= 10 else 2
+        pts_a, pts_b = [], []
+        max_amp = max(1.8, (h - 2.0) * 0.46)
         for x in range(x_start + 2, w - 2, step):
             nx = (x - x_start) / max(1.0, float(span))
             dist = (nx - crest) / sigma
             env = math.exp(-0.5 * dist * dist)
-            osc = math.sin(nx * 20.0 - phase * 5.2) * 0.65 + math.cos(nx * 9.0 + phase * 3.1) * 0.35
-            wy = yc + osc * max_amp * (0.25 + 0.75 * env)
-            pts.extend((x, wy))
-            if h >= 6 and env > 0.12:
-                bh = max(1.8, (h - 2) * env * (0.38 + 0.62 * abs(osc)))
-                col = signal_col if env > 0.62 else (sig_mid if env > 0.30 else sig_dim)
-                canvas.create_line(x, yc - bh / 2, x, yc + bh / 2, fill=col, width=1.5 if h <= 8 else 2, capstyle="round")
-        # Непрерывная бегущая волна-ползунок поверх трека
-        if len(pts) >= 4:
-            canvas.create_line(*pts, fill=(sig_mid if active else sig_dim), width=1.5 if h <= 6 else 2,
+            amp = max_amp * (0.14 + 0.86 * env)
+            osc_a = math.sin(nx * 16.0 - phase * 4.4) * 0.72 + math.cos(nx * 7.5 + phase * 2.3) * 0.28
+            osc_b = math.sin(nx * 12.0 - phase * 3.1 + 1.4) * 0.65 + math.cos(nx * 5.0 - phase * 1.8) * 0.35
+            pts_a.extend((x, yc + osc_a * amp))
+            pts_b.extend((x, yc + osc_b * amp * 0.72))
+
+        if len(pts_b) >= 4:
+            canvas.create_line(*pts_b, fill=sig_dim, width=2.4 if h >= 12 else 1.5,
                                smooth=True, capstyle="round")
-        # Яркий центральный волновой пакет («ползунок») вокруг гребня
+        if len(pts_a) >= 4:
+            canvas.create_line(*pts_a, fill=(sig_mid if active else sig_dim),
+                               width=1.8 if h >= 12 else 1.3, smooth=True, capstyle="round")
+
+        # Яркий световой пакет в области бегущего гребня
         win_pts = []
-        x0 = max(x_start + 2, int(x_start + (crest - sigma * 1.15) * span))
-        x1 = min(w - 2, int(x_start + (crest + sigma * 1.15) * span))
-        for x in range(x0, x1 + 1, 3):
+        x0 = max(x_start + 2, int(x_start + (crest - sigma * 1.1) * span))
+        x1 = min(w - 2, int(x_start + (crest + sigma * 1.1) * span))
+        for x in range(x0, x1 + 1, step):
             nx = (x - x_start) / max(1.0, float(span))
             dist = (nx - crest) / sigma
             env = math.exp(-0.5 * dist * dist)
-            osc = math.sin(nx * 22.0 - phase * 5.2)
-            wy = yc + osc * max_amp * env
-            win_pts.extend((x, wy))
+            osc = math.sin(nx * 16.0 - phase * 4.4) * 0.72 + math.cos(nx * 7.5 + phase * 2.3) * 0.28
+            win_pts.extend((x, yc + osc * max_amp * (0.14 + 0.86 * env)))
         if len(win_pts) >= 4:
             canvas.create_line(*win_pts, fill=(signal_col if active else sig_mid),
-                               width=2.2 if h <= 6 else 2.6, smooth=True, capstyle="round")
+                               width=2.4 if h >= 12 else 1.8, smooth=True, capstyle="round")
+
+        if active and h >= 9:
+            cx = x_start + crest * span
+            cy = yc + (math.sin(crest * 16.0 - phase * 4.4) * 0.72 + math.cos(crest * 7.5 + phase * 2.3) * 0.28) * max_amp
+            r = 2.6 if h >= 16 else 1.8
+            canvas.create_oval(cx - r, cy - r, cx + r, cy + r, fill=signal_col, outline="")
 
     def _schedule_wave_anim(self):
         if self._wave_anim_after is not None:
             return
         if self._any_rendering() and not self.stop_event.is_set():
-            self._wave_anim_after = self.root.after(45, self._wave_anim_tick)
+            self._wave_anim_after = self.root.after(33, self._wave_anim_tick)
         else:
             self._hide_row_waves()
 
@@ -4737,7 +4742,7 @@ class VoicePlayerApp:
             cv._row_iid = iid
             row_bg = self.col_sel if is_sel else self.col_panel
             cw = max(16, rw - 8)
-            ch = 7
+            ch = min(9, max(6, rh // 3))
             try:
                 cv.configure(bg=row_bg)
                 cv.place(x=rx + 4, y=ry + rh - ch - 1, width=cw, height=ch)
@@ -4776,12 +4781,12 @@ class VoicePlayerApp:
                 self._update_mini()
             self._wave_anim_after = self.root.after(250, self._wave_anim_tick)
             return
-        self._wave_phase = (self._wave_phase + 0.14) % 628.0
+        self._wave_phase = (self._wave_phase + 0.11) % 628.0
         self._update_row_waves()
         self._draw_seek()
         if self.mini is not None and self.mini.winfo_exists():
             self._update_mini()
-        self._wave_anim_after = self.root.after(45, self._wave_anim_tick)
+        self._wave_anim_after = self.root.after(33, self._wave_anim_tick)
 
     def _draw_seek(self, frac=None):
         c = self.seek_canvas
