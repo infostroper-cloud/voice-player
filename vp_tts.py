@@ -406,6 +406,7 @@ def render_audio_blocking(
     audio_dir: Optional[Path] = None,
     synthesize_fn=None,
     brief: bool = False,
+    auto_voice_lang: bool = False,
 ) -> None:
     """Озвучить реплику. Длинную — частями: каждая часть короткая и не упирается в таймаут,
     on_part вызывается по порядку, как только готова очередная часть (можно играть, не дожидаясь
@@ -424,14 +425,25 @@ def render_audio_blocking(
         log_line(f"render skip [{item.id}]: empty text")
         return
 
-    # Автоопределение языка текста: срабатывает ТОЛЬКО если голос не задан (пустой),
-    # чтобы выбранный пользователем голос по умолчанию никогда не подменялся.
-    if (not item.parts_done) and not voice:
+    # Автоопределение языка текста: срабатывает если голос не задан,
+    # либо если включён auto_voice_lang и язык текста не совпадает с языком выбранного голоса.
+    if not item.parts_done:
         detected = vp_i18n.detect_text_language(body)
-        if detected in vp_i18n.DEFAULT_VOICES_BY_LANG:
-            voice = vp_i18n.DEFAULT_VOICES_BY_LANG[detected]
-        else:
-            voice = TTS_VOICE
+        if not voice:
+            if detected in vp_i18n.DEFAULT_VOICES_BY_LANG:
+                voice = vp_i18n.DEFAULT_VOICES_BY_LANG[detected]
+            else:
+                voice = TTS_VOICE
+        elif auto_voice_lang and detected in vp_i18n.DEFAULT_VOICES_BY_LANG and "Multilingual" not in voice:
+            vlow = voice.lower()
+            if vlow.startswith("piper:ru_") or vlow.startswith("ru-"):
+                v_lang = "ru"
+            elif vlow.startswith("kokoro:") or vlow.startswith("en-"):
+                v_lang = "en"
+            else:
+                v_lang = vlow.split("-", 1)[0]
+            if v_lang != detected:
+                voice = vp_i18n.DEFAULT_VOICES_BY_LANG[detected]
 
     spans = [(a, b) for a, b in _split_for_tts(body) if any(ch.isalnum() for ch in body[a:b])]
     if not spans:

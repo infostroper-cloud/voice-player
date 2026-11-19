@@ -81,6 +81,29 @@ class TestPronunciationV2(unittest.TestCase):
         self.assertTrue(captured)
         self.assertLess(len(captured[0]), len(long_msg))
 
+    def test_auto_voice_lang_switches_russian_piper_to_english_when_enabled(self):
+        seen_voices = []
+
+        def fake_synth(text, rate, mp3_path, voice):
+            seen_voices.append(voice)
+            Path(mp3_path).write_bytes(b"ID3test")
+            return []
+
+        for flag in (False, True):
+            item = SimpleNamespace(
+                id=f"lang-{flag}", text="Hello world, all unit tests passed cleanly.",
+                parts_done=[], parts_fed=0, audio_path=None, audio_ready=False,
+                audio_error="", more_parts=False, marks=[], rendered_voice="",
+                deleted=False, source="codex",
+            )
+            with tempfile.TemporaryDirectory() as td:
+                vp_tts.render_audio_blocking(
+                    item, voice="piper:ru_RU-dmitri-medium",
+                    audio_dir=Path(td), synthesize_fn=fake_synth, auto_voice_lang=flag,
+                )
+        self.assertEqual(seen_voices[0], "piper:ru_RU-dmitri-medium")
+        self.assertNotEqual(seen_voices[1], "piper:ru_RU-dmitri-medium")
+
 
 if __name__ == "__main__":
     unittest.main()

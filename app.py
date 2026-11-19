@@ -572,11 +572,12 @@ vp_tts.configure(
 
 
 def render_audio_blocking(item: Item, rate: str = TTS_RATE, voice: str = TTS_VOICE,
-                          lead: str = "", on_part=None, should_yield=None, brief: bool = False) -> None:
+                          lead: str = "", on_part=None, should_yield=None,
+                          brief: bool = False, auto_voice_lang: bool = False) -> None:
     """Обёртка над vp_tts.render_audio_blocking (сохраняет совместимость с патчами app.AUDIO_DIR / app._synthesize)."""
     return vp_tts.render_audio_blocking(
         item, rate=rate, voice=voice, lead=lead, on_part=on_part, should_yield=should_yield,
-        audio_dir=AUDIO_DIR, synthesize_fn=_synthesize, brief=brief,
+        audio_dir=AUDIO_DIR, synthesize_fn=_synthesize, brief=brief, auto_voice_lang=auto_voice_lang,
     )
 
 
@@ -771,6 +772,8 @@ class VoicePlayerApp:
         self.var_autoplay = tk.BooleanVar(value=self.prefs.get("autoplay", True))
         self.var_brief_mode = tk.BooleanVar(value=bool(self.prefs.get("brief_mode", False)))
         self._brief_mode_on = self.var_brief_mode.get()
+        self.var_auto_voice_lang = tk.BooleanVar(value=bool(self.prefs.get("auto_voice_lang", False)))
+        self._auto_voice_lang_on = self.var_auto_voice_lang.get()
         # «не беспокоить» + тихие часы: новые реплики копятся и рендерятся, но не озвучиваются сами
         self.var_dnd      = tk.BooleanVar(value=self.prefs.get("dnd", False))
         self.var_quiet    = tk.BooleanVar(value=self.prefs.get("quiet_hours", False))
@@ -1152,6 +1155,7 @@ class VoicePlayerApp:
                 "source":   self.var_source.get(),
                 "autoplay": self.var_autoplay.get(),
                 "brief_mode": self.var_brief_mode.get(),
+                "auto_voice_lang": self.var_auto_voice_lang.get(),
                 "dnd": self.var_dnd.get(),
                 "quiet_hours": self.var_quiet.get(),
                 "quiet_from": self._quiet_from,
@@ -4059,6 +4063,10 @@ class VoicePlayerApp:
                         variable=self.var_ai_intermediate_reasoning,
                         command=self._on_ai_reasoning_toggle).grid(
             row=51, column=0, columnspan=2, sticky="w", pady=(4, 0))
+        ttk.Checkbutton(t1, text="🌐 Авто-выбор голоса по языку текста (RU ↔ EN)",
+                        variable=self.var_auto_voice_lang,
+                        command=lambda: (setattr(self, "_auto_voice_lang_on", self.var_auto_voice_lang.get()), self._save_prefs())).grid(
+            row=52, column=0, columnspan=2, sticky="w", pady=(4, 0))
         ttk.Label(t1, text=vp_i18n.t("opt_sleep_timer")).grid(row=6, column=0, sticky="w", pady=(10, 0))
         off_lbl = vp_i18n.t("off")
         m_lbl = vp_i18n.t("min_short")
@@ -5659,7 +5667,8 @@ class VoicePlayerApp:
                 render_audio_blocking(item, voice=voice, lead=lead,
                                       on_part=self._on_part_ready if streaming else None,
                                       should_yield=_should_yield,
-                                      brief=(self._brief_mode_on and item.source in AI_SOURCES))
+                                      brief=(self._brief_mode_on and item.source in AI_SOURCES),
+                                      auto_voice_lang=self._auto_voice_lang_on)
             finally:
                 if self._rendering_item_id == item.id:
                     self._rendering_item_id = None

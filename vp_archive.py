@@ -7,7 +7,7 @@ import time
 from pathlib import Path
 
 ARCHIVE_DB = (Path.home() / ".voice-player-archive.db").resolve()   # полный искомый архив
-PLAYLISTS_FILE = Path.home() / ".voice-player-playlists.json"
+PLAYLISTS_FILE = (Path.home() / ".voice-player-playlists.json").resolve()
 
 _archive_lock = threading.Lock()
 _embed_holder = {"model": None, "lock": threading.Lock()}
