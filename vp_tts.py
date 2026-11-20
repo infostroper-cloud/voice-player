@@ -570,3 +570,4 @@ def render_audio_blocking(
         item.audio_path = mp3_file
     item.audio_ready = True
     item.more_parts = False
+    log_line(f"render OK [{item.id}] voice={voice} parts={len(spans)}")

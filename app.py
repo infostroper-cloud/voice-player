@@ -1086,8 +1086,9 @@ class VoicePlayerApp:
                     break
         if self._dnd_active():           # тишина на старте — не начинать озвучку сами
             self.user_paused = True
-        for it in to_render:
-            self._q_put(it, 100)
+        ordered_render = list(reversed(to_render)) if self.var_newest_first.get() else to_render
+        for it in ordered_render:
+            self._q_put(it, 0 if it is restored_cur else 100)
         if to_render:
             self.root.after(0, self._request_render)
         self._render_list()
@@ -5635,6 +5636,11 @@ class VoicePlayerApp:
         except Exception:
             pass
 
+    def _has_higher_prio_render(self, prio: int) -> bool:
+        """Есть ли в очереди рендера задача со строго более высоким приоритетом (< prio)."""
+        with self.render_queue.mutex:
+            return bool(self.render_queue.queue) and self.render_queue.queue[0][0] < prio
+
     def _render_worker_loop(self):
         while not self.stop_event.is_set():
             try: prio, seq, item = self.render_queue.get(timeout=0.5)
@@ -5652,7 +5658,7 @@ class VoicePlayerApp:
             streaming = hasattr(self.player, "append_file")  # старый MCI-плеер ждёт весь файл
             self._rendering_item_id = item.id
             self._ui_after(self._schedule_wave_anim)
-            def _should_yield(it):
+            def _should_yield(it, cur_prio=prio):
                 if self.stop_event.is_set() or it.deleted:
                     return True
                 expected = _resolve_item_voice(it, self._author_voices, getattr(self, "_voice", TTS_VOICE))
@@ -5661,7 +5667,7 @@ class VoicePlayerApp:
                 cur_it = self.queue_items[self.current_idx] if 0 <= self.current_idx < len(self.queue_items) else None
                 if it is cur_it:
                     return False
-                return not self.render_queue.empty()
+                return self._has_higher_prio_render(cur_prio)
 
             try:
                 render_audio_blocking(item, voice=voice, lead=lead,
